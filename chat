@@ -1,0 +1,9 @@
+#!/system/bin/sh
+SID="123e4567-e89b-12d3-a456-426614174000"
+while true; do
+  printf "\n你： "
+  read -r q || break
+  [ "$q" = "/exit" ] && break
+  printf "Claude： "
+  claude -p --verbose --output-format stream-json --session-id "$SID" "$q"
+done

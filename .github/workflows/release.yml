@@ -1,0 +1,133 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送v开头的标签时触发，例如v1.0.0
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取所有历史记录以便正确标记
+
+      # 2. 设置JDK 17（Minecraft 1.20.1需要Java 17）
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      # 3. 缓存Gradle依赖项以加速构建
+      - name: Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            ${{ runner.os }}-gradle-
+
+      # 4. 使gradlew可执行
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      # 5. 构建项目
+      - name: Build with Gradle
+        run: ./gradlew build
+
+      # 6. 提取版本信息
+      - name: Extract version info
+        id: version
+        run: |
+          # 从gradle.properties读取版本号
+          VERSION=$(grep 'mod_version' gradle.properties | cut -d'=' -f2)
+          echo "VERSION=${VERSION}" >> $GITHUB_OUTPUT
+
+          # 从tag名获取release名称（如果没有tag则使用gradle版本）
+          if [[ -n "${{ github.ref_name }}" ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            # 移除v前缀（如果存在）
+            RELEASE_NAME="${TAG_NAME#v}"
+          else
+            RELEASE_NAME="${VERSION}"
+          fi
+          echo "RELEASE_NAME=${RELEASE_NAME}" >> $GITHUB_OUTPUT
+          echo "TAG_NAME=${TAG_NAME:-v${VERSION}}" >> $GITHUB_OUTPUT
+
+          echo "Build version: ${VERSION}"
+          echo "Release name: ${RELEASE_NAME}"
+          echo "Tag name: ${TAG_NAME:-v${VERSION}}"
+
+      # 7. 列出构建产物
+      - name: List build artifacts
+        run: |
+          echo "=== Build output directory ==="
+          ls -la build/libs/
+          echo "=== JAR files ==="
+          find build/libs -name "*.jar" -type f | xargs ls -lh
+
+      # 8. 上传构建产物作为工作流制品（可选，用于调试）
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mod-jar-${{ steps.version.outputs.RELEASE_NAME }}
+          path: build/libs/*.jar
+          retention-days: 7
+
+      # 9. 创建GitHub Release
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.version.outputs.TAG_NAME }}
+          name: "Version ${{ steps.version.outputs.RELEASE_NAME }}"
+          body: |
+            ## Minecraft Ticket System Mod v${{ steps.version.outputs.RELEASE_NAME }}
+
+            **自动构建和发布**
+
+            ### 构建信息
+            - 版本: ${{ steps.version.outputs.VERSION }}
+            - Java: 17
+            - Minecraft: 1.20.1
+            - 构建时间: ${{ github.event.head_commit.timestamp }}
+
+            ### 许可证
+            本项目采用GPLv3许可证发布，详见LICENSE文件。
+
+            包含基于MIT许可证的前端代码，详见NOTICE.txt。
+
+            ### 使用说明
+            1. 将JAR文件放入Minecraft的`mods`文件夹
+            2. 需要Forge 47.4.0或更高版本
+            3. 支持Minecraft 1.20.1
+
+            ### 变更日志
+            请查看changelog.txt获取详细变更信息。
+
+            *自动生成于GitHub Actions*
+          draft: false
+          prerelease: false
+          files: |
+            build/libs/*.jar
+            LICENSE
+            MIT-LICENSE.txt
+            NOTICE.txt
+            CREDITS.txt
+            changelog.txt
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # 10. 输出发布信息
+      - name: Show release info
+        run: |
+          echo "🎉 Release created successfully!"
+          echo "Version: ${{ steps.version.outputs.RELEASE_NAME }}"
+          echo "Tag: ${{ steps.version.outputs.TAG_NAME }}"
+          echo "Release URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.TAG_NAME }}"

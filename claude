@@ -1,0 +1,4 @@
+#!/system/bin/sh
+export CLAUDE_SESSION="./claude.session"
+exec claude --session "$CLAUDE_SESSION" --output-format stream-json "$@"
+

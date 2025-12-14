@@ -1,0 +1,1199 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>铁路票务系统 · 控制台</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 主题切换按钮 */
+    .theme-toggle {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+
+    .theme-toggle:hover {
+      background: var(--card);
+    }
+
+    .theme-icon {
+      font-size: 18px;
+    }
+
+    /* 导航卡片 */
+    .nav-cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 24px;
+      margin-top: 24px;
+    }
+
+    .nav-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      text-decoration: none;
+      color: var(--text);
+      transition: all 0.2s ease;
+      display: block;
+    }
+
+    .nav-card:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+      border-color: var(--accent);
+    }
+
+    .nav-icon {
+      font-size: 32px;
+      margin-bottom: 16px;
+    }
+
+    .nav-title {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+
+    .nav-desc {
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    /* 仪表板统计 */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+
+    .stat-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      text-align: center;
+    }
+
+    .stat-value {
+      font-size: 48px;
+      font-weight: 900;
+      color: var(--accent);
+      line-height: 1;
+      margin: 12px 0;
+    }
+
+    .stat-label {
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    /* 响应式调整 */
+    @media (max-width: 768px) {
+      .nav-cards {
+        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        gap: 16px;
+      }
+
+      .theme-toggle {
+        position: static;
+        margin-left: auto;
+        order: 2;
+      }
+
+      .brand {
+        flex-wrap: wrap;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .nav-cards {
+        grid-template-columns: 1fr;
+      }
+
+      .stats-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+  <script src="theme.js"></script>
+</head>
+<body>
+  <header class="brand" style="position: relative; padding: 20px 24px;">
+    <div class="brand-title">铁路票务系统 · 控制台</div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">仪表盘</button>
+      <button class="tab" data-tab="station">车站编辑</button>
+      <button class="tab" data-tab="line">线路编辑</button>
+      <button class="tab" data-tab="ticket">票务管理</button>
+      <button class="tab" data-tab="logs">操作日志</button>
+      <button class="tab" data-tab="settings">系统设置</button>
+    </nav>
+    <button id="themeToggle" class="theme-toggle">
+      <span class="theme-icon">🌙</span>
+      <span id="themeLabel">深色模式</span>
+    </button>
+  </header>
+
+  <main>
+    <!-- 仪表盘 -->
+    <section id="tab-dashboard" class="tab-panel show">
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-label">车站数量</div>
+          <div class="stat-value" id="stationCount">0</div>
+          <div style="color: var(--muted); font-size: 12px;">已注册车站</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">线路数量</div>
+          <div class="stat-value" id="lineCount">0</div>
+          <div style="color: var(--muted); font-size: 12px;">运营线路</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">今日票务</div>
+          <div class="stat-value" id="ticketCount">0</div>
+          <div style="color: var(--muted); font-size: 12px;">今日售出票数</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">系统状态</div>
+          <div class="stat-value" style="font-size: 24px; color: var(--accent);" id="systemStatus">正常</div>
+          <div style="color: var(--muted); font-size: 12px;">API 连接正常</div>
+        </div>
+      </div>
+
+      <div class="nav-cards">
+        <a href="station-edit.html" class="nav-card">
+          <div class="nav-icon">🚉</div>
+          <div class="nav-title">车站编辑</div>
+          <div class="nav-desc">添加、编辑或删除车站信息，设置车站坐标与属性。</div>
+        </a>
+
+        <a href="line-edit.html" class="nav-card">
+          <div class="nav-icon">🛤️</div>
+          <div class="nav-title">线路编辑</div>
+          <div class="nav-desc">创建和管理铁路线路，设置车站顺序、线路颜色与属性。</div>
+        </a>
+
+        <a href="console.html" class="nav-card">
+          <div class="nav-icon">🎫</div>
+          <div class="nav-title">票务管理</div>
+          <div class="nav-desc">管理车票销售、票价设置、线路编辑与票价计算。</div>
+        </a>
+
+        <a href="logs.html" class="nav-card">
+          <div class="nav-icon">📝</div>
+          <div class="nav-title">操作日志</div>
+          <div class="nav-desc">查看系统操作记录，支持按IP、类型筛选与时间线视图。</div>
+        </a>
+      </div>
+    </section>
+
+    <!-- 车站管理 (分层结构) -->
+    <section id="tab-station" class="tab-panel">
+      <div style="max-width: 1200px; margin: 0 auto; padding: 24px;">
+        <h2 style="color: var(--text); margin-bottom: 24px;">车站管理</h2>
+
+        <!-- 车站列表视图 -->
+        <div id="station-list-view" class="station-view">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: var(--text); margin: 0;">车站列表</h3>
+            <div style="display: flex; gap: 12px;">
+              <button id="btn-new-station" class="btn primary" style="padding: 10px 20px;">新建车站</button>
+              <button id="btn-refresh-stations" class="btn" style="padding: 10px 20px;">刷新</button>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 20px;">
+            <input type="text" id="search-stations" placeholder="搜索车站编码或名称..." style="width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;" />
+          </div>
+
+          <div id="stations-table-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--surface);">
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">车站编码</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">车站名称</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">英文名称</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">坐标</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">操作</th>
+                </tr>
+              </thead>
+              <tbody id="stations-tbody">
+                <tr>
+                  <td colspan="5" style="padding: 40px; text-align: center; color: var(--muted);">加载中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-top: 20px; font-size: 14px; color: var(--muted);">
+            提示：点击"编辑"进入车站详细编辑页面，支持设置坐标、修改名称等。
+          </div>
+        </div>
+
+        <!-- 车站编辑视图 (初始隐藏，通过JavaScript控制) -->
+        <div id="station-edit-view" class="station-view" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: var(--text); margin: 0;">车站编辑</h3>
+            <button id="btn-back-to-station-list" class="btn" style="padding: 10px 20px;">返回列表</button>
+          </div>
+          <div id="station-edit-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
+            <p style="color: var(--muted); margin-bottom: 20px; text-align: center;">
+              车站编辑功能仍在独立页面提供最佳体验。
+              <br>正在加载车站编辑页面...
+            </p>
+            <div style="text-align: center;">
+              <a id="station-edit-link" href="station-edit.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往车站编辑页面</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 线路管理 (分层结构) -->
+    <section id="tab-line" class="tab-panel">
+      <div style="max-width: 1200px; margin: 0 auto; padding: 24px;">
+        <h2 style="color: var(--text); margin-bottom: 24px;">线路管理</h2>
+
+        <!-- 线路列表视图 -->
+        <div id="line-list-view" class="line-view">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: var(--text); margin: 0;">线路列表</h3>
+            <div style="display: flex; gap: 12px;">
+              <button id="btn-new-line" class="btn primary" style="padding: 10px 20px;">新建线路</button>
+              <button id="btn-refresh-lines" class="btn" style="padding: 10px 20px;">刷新</button>
+            </div>
+          </div>
+
+          <div style="margin-bottom: 20px;">
+            <input type="text" id="search-lines" placeholder="搜索线路ID或名称..." style="width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;" />
+          </div>
+
+          <div id="lines-table-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+            <table style="width: 100%; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--surface);">
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">线路ID</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">线路名称</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">颜色</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">车站数量</th>
+                  <th style="padding: 16px; text-align: left; color: var(--text); font-weight: 700; border-bottom: 1px solid var(--border);">操作</th>
+                </tr>
+              </thead>
+              <tbody id="lines-tbody">
+                <tr>
+                  <td colspan="5" style="padding: 40px; text-align: center; color: var(--muted);">加载中...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="margin-top: 20px; font-size: 14px; color: var(--muted);">
+            提示：点击"编辑"进入线路详细编辑页面，支持拖拽排序车站、设置线路颜色等。
+          </div>
+        </div>
+
+        <!-- 线路编辑视图 (初始隐藏，通过JavaScript控制) -->
+        <div id="line-edit-view" class="line-view" style="display: none;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h3 style="color: var(--text); margin: 0;">线路编辑</h3>
+            <button id="btn-back-to-list" class="btn" style="padding: 10px 20px;">返回列表</button>
+          </div>
+          <div id="line-edit-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
+            <p style="color: var(--muted); margin-bottom: 20px; text-align: center;">
+              线路编辑功能仍在独立页面提供最佳体验。
+              <br>正在加载线路编辑页面...
+            </p>
+            <div style="text-align: center;">
+              <a id="line-edit-link" href="line-edit.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往线路编辑页面</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 票务管理 (重定向) -->
+    <section id="tab-ticket" class="tab-panel">
+      <div style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 48px; margin-bottom: 20px;">🎫</div>
+        <h2 style="color: var(--text); margin-bottom: 16px;">票务管理功能已独立</h2>
+        <p style="color: var(--muted); max-width: 500px; margin: 0 auto 30px;">
+          票务管理功能已迁移到独立控制台页面，提供完整的票务操作界面。
+        </p>
+        <a href="console.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往票务管理页面</a>
+      </div>
+    </section>
+
+    <!-- 操作日志 (重定向) -->
+    <section id="tab-logs" class="tab-panel">
+      <div style="text-align: center; padding: 60px 20px;">
+        <div style="font-size: 48px; margin-bottom: 20px;">📝</div>
+        <h2 style="color: var(--text); margin-bottom: 16px;">操作日志功能已独立</h2>
+        <p style="color: var(--muted); max-width: 500px; margin: 0 auto 30px;">
+          操作日志功能已迁移到独立页面，支持分组视图、时间线与高级筛选。
+        </p>
+        <a href="logs.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往操作日志页面</a>
+      </div>
+    </section>
+
+    <!-- 系统设置 -->
+    <section id="tab-settings" class="tab-panel">
+      <div style="max-width: 800px; margin: 0 auto; padding: 24px;">
+        <h2 style="color: var(--text); margin-bottom: 24px;">系统设置</h2>
+
+        <!-- API 配置 -->
+        <div class="setting-card" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 24px;">
+          <h3 style="color: var(--text); margin-bottom: 16px;">API 配置</h3>
+          <p style="color: var(--muted); margin-bottom: 20px; font-size: 14px;">
+            配置后端 API 服务器地址。默认使用 127.0.0.1（本地游戏内服务器）。
+            如果游戏内配置了 API 地址，将优先使用游戏内配置。
+          </p>
+
+          <div style="display: grid; gap: 16px;">
+            <div>
+              <label style="display: block; color: var(--text); margin-bottom: 8px; font-weight: 700;">API 基础地址</label>
+              <input type="text" id="apiBase" placeholder="http://127.0.0.1:23333/api" style="width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;" />
+              <div style="display: flex; gap: 12px; margin-top: 12px;">
+                <button id="saveApiConfig" class="btn primary" style="padding: 10px 20px;">保存到浏览器</button>
+                <button id="clearApiCache" class="btn" style="padding: 10px 20px;">清除缓存并使用默认</button>
+                <button id="loadGameConfig" class="btn" style="padding: 10px 20px;">从游戏内配置加载</button>
+              </div>
+            </div>
+
+            <div style="background: var(--surface); border-radius: 8px; padding: 16px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                <strong style="color: var(--text);">当前使用的 API 地址</strong>
+                <span id="apiStatus" style="font-size: 12px; padding: 4px 8px; border-radius: 12px; background: var(--accent); color: white;">默认</span>
+              </div>
+              <code id="currentApiUrl" style="display: block; padding: 12px; background: var(--card); border-radius: 6px; font-family: monospace; color: var(--text); word-break: break-all;">http://127.0.0.1:23333/api</code>
+              <div style="margin-top: 12px; font-size: 12px; color: var(--muted);">
+                <div>优先级：游戏内配置 > 浏览器存储 > 默认地址</div>
+                <div id="apiSourceInfo" style="margin-top: 4px;">来源：默认地址</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 主题设置 -->
+        <div class="setting-card" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px; margin-bottom: 24px;">
+          <h3 style="color: var(--text); margin-bottom: 16px;">界面设置</h3>
+          <div style="display: grid; gap: 16px;">
+            <div>
+              <label style="display: block; color: var(--text); margin-bottom: 8px; font-weight: 700;">主题模式</label>
+              <select id="colorMode" style="width: 100%; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 14px;">
+                <option value="dark">深色模式</option>
+                <option value="light">浅色模式</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 12px;">
+              <button id="saveTheme" class="btn primary" style="padding: 10px 20px;">保存主题设置</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 数据管理 -->
+        <div class="setting-card" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
+          <h3 style="color: var(--text); margin-bottom: 16px;">数据管理</h3>
+          <p style="color: var(--muted); margin-bottom: 20px; font-size: 14px;">
+            导出系统数据为 JSON 文件，或从 JSON 文件导入数据。
+          </p>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <button id="exportData" class="btn primary" style="padding: 10px 20px;">导出数据 (JSON)</button>
+            <label class="btn" style="padding: 10px 20px; cursor: pointer;">
+              导入数据 (JSON)
+              <input id="importData" type="file" accept="application/json" style="display: none;" />
+            </label>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // 主题切换功能（使用公共模块）
+    // ThemeManager会自动初始化
+
+    // ==================== API配置管理 ====================
+    const ApiConfigManager = {
+      // 存储键名
+      STORAGE_KEYS: {
+        API_BASE: 'ticketsystem_api_base',
+        API_SOURCE: 'ticketsystem_api_source'
+      },
+
+      // 默认API地址
+      DEFAULT_API_BASE: 'http://127.0.0.1:23333/api',
+
+      // 当前使用的API基础地址
+      currentApiBase: null,
+      currentSource: null,
+
+      // 初始化：确定要使用的API地址
+      async init() {
+        try {
+          // 1. 尝试从游戏配置获取
+          const gameConfig = await this.fetchGameConfig();
+          const gameApiBase = gameConfig?.game_api_base || '';
+
+          // 2. 从浏览器本地存储获取
+          const storedApiBase = localStorage.getItem(this.STORAGE_KEYS.API_BASE);
+          const storedSource = localStorage.getItem(this.STORAGE_KEYS.API_SOURCE);
+
+          // 3. 应用优先级：游戏配置 > 浏览器存储 > 默认地址
+          if (gameApiBase && gameApiBase.trim() !== '') {
+            this.currentApiBase = gameApiBase.trim();
+            this.currentSource = 'game_config';
+            console.log('使用游戏内配置的API地址:', this.currentApiBase);
+          } else if (storedApiBase && storedApiBase.trim() !== '') {
+            this.currentApiBase = storedApiBase.trim();
+            this.currentSource = storedSource || 'browser_storage';
+            console.log('使用浏览器存储的API地址:', this.currentApiBase);
+          } else {
+            this.currentApiBase = this.DEFAULT_API_BASE;
+            this.currentSource = 'default';
+            console.log('使用默认API地址:', this.currentApiBase);
+          }
+
+          // 更新UI显示
+          this.updateUi();
+
+          // 设置全局fetch函数使用当前API地址
+          this.overrideFetch();
+
+          return this.currentApiBase;
+        } catch (error) {
+          console.error('API配置初始化失败:', error);
+          this.currentApiBase = this.DEFAULT_API_BASE;
+          this.currentSource = 'default';
+          this.updateUi();
+          this.overrideFetch();
+          return this.currentApiBase;
+        }
+      },
+
+      // 从服务器获取游戏配置
+      async fetchGameConfig() {
+        try {
+          // 使用默认地址获取配置
+          const response = await fetch('/api/config');
+          if (response.ok) {
+            return await response.json();
+          }
+          return null;
+        } catch (error) {
+          console.warn('获取游戏配置失败:', error);
+          return null;
+        }
+      },
+
+      // 更新UI显示
+      updateUi() {
+        const apiBaseInput = document.getElementById('apiBase');
+        const currentApiUrl = document.getElementById('currentApiUrl');
+        const apiStatus = document.getElementById('apiStatus');
+        const apiSourceInfo = document.getElementById('apiSourceInfo');
+
+        if (apiBaseInput) {
+          apiBaseInput.value = this.currentApiBase;
+        }
+
+        if (currentApiUrl) {
+          currentApiUrl.textContent = this.currentApiBase;
+        }
+
+        if (apiStatus) {
+          let statusText = '默认';
+          let statusColor = 'var(--accent)';
+
+          switch (this.currentSource) {
+            case 'game_config':
+              statusText = '游戏配置';
+              statusColor = 'var(--success)';
+              break;
+            case 'browser_storage':
+              statusText = '浏览器存储';
+              statusColor = 'var(--warning)';
+              break;
+            case 'default':
+              statusText = '默认';
+              statusColor = 'var(--accent)';
+              break;
+          }
+
+          apiStatus.textContent = statusText;
+          apiStatus.style.backgroundColor = statusColor;
+        }
+
+        if (apiSourceInfo) {
+          let sourceText = '来源：';
+          switch (this.currentSource) {
+            case 'game_config':
+              sourceText += '游戏内配置';
+              break;
+            case 'browser_storage':
+              sourceText += '浏览器本地存储';
+              break;
+            case 'default':
+              sourceText += '默认地址';
+              break;
+          }
+          apiSourceInfo.textContent = sourceText;
+        }
+      },
+
+      // 保存到浏览器本地存储
+      saveToBrowser(apiBase) {
+        const trimmed = apiBase.trim();
+        if (!trimmed) {
+          alert('API地址不能为空');
+          return false;
+        }
+
+        try {
+          // 简单验证URL格式
+          new URL(trimmed);
+        } catch (error) {
+          alert('请输入有效的URL格式（如 http://127.0.0.1:23333/api）');
+          return false;
+        }
+
+        localStorage.setItem(this.STORAGE_KEYS.API_BASE, trimmed);
+        localStorage.setItem(this.STORAGE_KEYS.API_SOURCE, 'browser_storage');
+
+        // 重新初始化
+        this.init();
+
+        alert('API地址已保存到浏览器本地存储');
+        return true;
+      },
+
+      // 清除浏览器缓存，使用默认地址
+      clearBrowserCache() {
+        localStorage.removeItem(this.STORAGE_KEYS.API_BASE);
+        localStorage.removeItem(this.STORAGE_KEYS.API_SOURCE);
+
+        // 重新初始化
+        this.init();
+
+        alert('已清除浏览器缓存，使用默认API地址');
+      },
+
+      // 从游戏配置加载
+      async loadFromGameConfig() {
+        try {
+          const gameConfig = await this.fetchGameConfig();
+          const gameApiBase = gameConfig?.game_api_base || '';
+
+          if (gameApiBase && gameApiBase.trim() !== '') {
+            this.currentApiBase = gameApiBase.trim();
+            this.currentSource = 'game_config';
+            this.updateUi();
+            alert('已加载游戏内配置的API地址');
+          } else {
+            alert('游戏内未配置API地址，请先在游戏配置中设置');
+          }
+        } catch (error) {
+          console.error('加载游戏配置失败:', error);
+          alert('加载游戏配置失败: ' + error.message);
+        }
+      },
+
+      // 重写fetch函数，自动使用当前API地址
+      overrideFetch() {
+        const originalFetch = window.fetch;
+        const apiBase = this.currentApiBase;
+
+        window.fetch = async function(resource, options) {
+          let url = resource;
+
+          // 如果是相对路径，且不是以 /api 开头（静态资源），则添加API基础地址
+          if (typeof resource === 'string' && resource.startsWith('/api')) {
+            // 如果当前API地址不是默认地址，且请求的是API路径，则替换基础地址
+            if (apiBase !== ApiConfigManager.DEFAULT_API_BASE) {
+              // 移除默认的基础部分，添加当前API基础地址
+              const apiPath = resource;
+              url = apiBase.replace(/\/api$/, '') + apiPath;
+            }
+          }
+
+          return originalFetch.call(window, url, options);
+        };
+      }
+    };
+
+    // 系统设置事件监听器
+    function setupSystemSettings() {
+      // 保存API配置按钮
+      const saveApiConfigBtn = document.getElementById('saveApiConfig');
+      if (saveApiConfigBtn) {
+        saveApiConfigBtn.addEventListener('click', () => {
+          const apiBaseInput = document.getElementById('apiBase');
+          if (apiBaseInput) {
+            ApiConfigManager.saveToBrowser(apiBaseInput.value);
+          }
+        });
+      }
+
+      // 清除API缓存按钮
+      const clearApiCacheBtn = document.getElementById('clearApiCache');
+      if (clearApiCacheBtn) {
+        clearApiCacheBtn.addEventListener('click', () => {
+          if (confirm('确定要清除浏览器缓存并使用默认API地址吗？')) {
+            ApiConfigManager.clearBrowserCache();
+          }
+        });
+      }
+
+      // 从游戏配置加载按钮
+      const loadGameConfigBtn = document.getElementById('loadGameConfig');
+      if (loadGameConfigBtn) {
+        loadGameConfigBtn.addEventListener('click', () => {
+          ApiConfigManager.loadFromGameConfig();
+        });
+      }
+
+      // 主题保存按钮
+      const saveThemeBtn = document.getElementById('saveTheme');
+      if (saveThemeBtn) {
+        saveThemeBtn.addEventListener('click', () => {
+          const colorMode = document.getElementById('colorMode');
+          if (colorMode) {
+            const theme = colorMode.value;
+            window.ThemeManager.setTheme(theme);
+            alert('主题设置已保存');
+          }
+        });
+      }
+
+      // 数据导出按钮
+      const exportDataBtn = document.getElementById('exportData');
+      if (exportDataBtn) {
+        exportDataBtn.addEventListener('click', () => {
+          window.open('/api/export', '_blank');
+        });
+      }
+
+      // 数据导入文件选择
+      const importDataInput = document.getElementById('importData');
+      if (importDataInput) {
+        importDataInput.addEventListener('change', (event) => {
+          const file = event.target.files[0];
+          if (!file) return;
+
+          if (!file.name.endsWith('.json')) {
+            alert('请选择JSON文件');
+            return;
+          }
+
+          const reader = new FileReader();
+          reader.onload = function(e) {
+            try {
+              const data = JSON.parse(e.target.result);
+              // 这里可以添加数据导入逻辑
+              alert('文件读取成功，数据导入功能待实现');
+            } catch (error) {
+              alert('文件解析失败: ' + error.message);
+            }
+          };
+          reader.readAsText(file);
+
+          // 清空文件选择，允许重复选择同一文件
+          event.target.value = '';
+        });
+      }
+
+      // 初始化主题选择框
+      const colorMode = document.getElementById('colorMode');
+      if (colorMode) {
+        // 设置当前主题
+        const currentTheme = window.ThemeManager.getCurrentTheme();
+        colorMode.value = currentTheme;
+
+        // 监听主题变化事件，更新选择框
+        window.ThemeManager.onThemeChange((theme) => {
+          colorMode.value = theme;
+        });
+      }
+    }
+
+    // 标签页切换
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.tab-panel');
+
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => {
+        const targetTab = tab.getAttribute('data-tab');
+
+        // 更新标签状态
+        tabs.forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+
+        // 显示对应面板
+        panels.forEach(panel => {
+          panel.classList.remove('show');
+          if (panel.id === `tab-${targetTab}`) {
+            panel.classList.add('show');
+          }
+        });
+      });
+    });
+
+    // 加载统计数据
+    async function loadStats() {
+      try {
+        const response = await fetch('/api/stations');
+        if (response.ok) {
+          const stations = await response.json();
+          document.getElementById('stationCount').textContent = stations.length;
+        }
+
+        const linesResponse = await fetch('/api/lines');
+        if (linesResponse.ok) {
+          const lines = await linesResponse.json();
+          document.getElementById('lineCount').textContent = lines.length;
+        }
+
+        // 尝试获取今日票务数据
+        const ticketsResponse = await fetch('/api/tickets');
+        if (ticketsResponse.ok) {
+          const data = await ticketsResponse.json();
+          if (data.ok && data.tickets) {
+            const today = new Date().toISOString().split('T')[0];
+            const todayTickets = data.tickets.filter(t => {
+              const ticketDate = new Date(t.last_update_ts).toISOString().split('T')[0];
+              return ticketDate === today;
+            });
+            document.getElementById('ticketCount').textContent = todayTickets.length;
+          }
+        }
+
+        // 检查API健康状态
+        const healthResponse = await fetch('/api/health');
+        if (healthResponse.ok) {
+          document.getElementById('systemStatus').textContent = '正常';
+          document.getElementById('systemStatus').style.color = 'var(--accent)';
+        } else {
+          document.getElementById('systemStatus').textContent = '异常';
+          document.getElementById('systemStatus').style.color = 'var(--danger)';
+        }
+      } catch (error) {
+        console.error('加载统计数据失败:', error);
+        document.getElementById('systemStatus').textContent = '离线';
+        document.getElementById('systemStatus').style.color = 'var(--warning)';
+      }
+    }
+
+    // 线路管理功能
+    function initLineManagement() {
+      const btnNewLine = document.getElementById('btn-new-line');
+      const btnRefreshLines = document.getElementById('btn-refresh-lines');
+      const btnBackToList = document.getElementById('btn-back-to-list');
+      const searchLinesInput = document.getElementById('search-lines');
+      const lineListView = document.getElementById('line-list-view');
+      const lineEditView = document.getElementById('line-edit-view');
+      const lineEditLink = document.getElementById('line-edit-link');
+
+      if (!btnNewLine) return; // 如果不在线路管理标签页，则跳过
+
+      let allLines = [];
+      let filteredLines = [];
+
+      // 加载线路列表
+      async function loadLines() {
+        try {
+          const response = await fetch('/api/lines');
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          allLines = await response.json();
+          filterLines();
+        } catch (error) {
+          console.error('加载线路列表失败:', error);
+          updateLinesTable([{ error: true, message: '加载失败: ' + error.message }]);
+        }
+      }
+
+      // 过滤线路
+      function filterLines() {
+        const searchTerm = searchLinesInput.value.toLowerCase().trim();
+        if (!searchTerm) {
+          filteredLines = allLines;
+        } else {
+          filteredLines = allLines.filter(line =>
+            (line.id && line.id.toLowerCase().includes(searchTerm)) ||
+            (line.name && line.name.toLowerCase().includes(searchTerm))
+          );
+        }
+        updateLinesTable(filteredLines);
+      }
+
+      // 更新表格
+      function updateLinesTable(lines) {
+        const tbody = document.getElementById('lines-tbody');
+        if (!tbody) return;
+
+        if (lines.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="padding: 40px; text-align: center; color: var(--muted);">
+                暂无线路数据
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        // 检查是否是错误对象
+        if (lines[0] && lines[0].error) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="padding: 40px; text-align: center; color: var(--danger);">
+                ${lines[0].message || '加载线路列表失败'}
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        let html = '';
+        lines.forEach(line => {
+          const stationCount = line.stations ? line.stations.length : 0;
+          html += `
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 16px; color: var(--text);">
+                <strong>${line.id || ''}</strong>
+              </td>
+              <td style="padding: 16px; color: var(--text);">
+                ${line.name || ''}
+              </td>
+              <td style="padding: 16px;">
+                ${line.color ? `
+                  <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="width: 20px; height: 20px; border-radius: 4px; background: ${line.color}; border: 1px solid var(--border);"></div>
+                    <span style="color: var(--text); font-family: monospace; font-size: 12px;">${line.color}</span>
+                  </div>
+                ` : '<span style="color: var(--muted);">未设置</span>'}
+              </td>
+              <td style="padding: 16px; color: var(--text);">
+                ${stationCount} 个车站
+              </td>
+              <td style="padding: 16px;">
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn-edit-line" data-id="${line.id}" style="padding: 6px 12px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">编辑</button>
+                  <button class="btn-delete-line" data-id="${line.id}" style="padding: 6px 12px; background: var(--danger); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">删除</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+
+        tbody.innerHTML = html;
+
+        // 绑定编辑和删除按钮事件
+        tbody.querySelectorAll('.btn-edit-line').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const lineId = btn.getAttribute('data-id');
+            editLine(lineId);
+          });
+        });
+
+        tbody.querySelectorAll('.btn-delete-line').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const lineId = btn.getAttribute('data-id');
+            deleteLine(lineId);
+          });
+        });
+      }
+
+      // 编辑线路
+      function editLine(lineId) {
+        // 切换到编辑视图
+        lineListView.style.display = 'none';
+        lineEditView.style.display = 'block';
+
+        // 更新编辑页面链接
+        if (lineEditLink) {
+          lineEditLink.href = `line-edit.html?id=${encodeURIComponent(lineId)}`;
+          lineEditLink.textContent = `编辑线路: ${lineId}`;
+        }
+      }
+
+      // 删除线路
+      async function deleteLine(lineId) {
+        if (!confirm(`确定要删除线路 "${lineId}" 吗？此操作不可恢复。`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/lines/${encodeURIComponent(lineId)}`, {
+            method: 'DELETE'
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          alert('线路删除成功');
+          loadLines(); // 重新加载列表
+        } catch (error) {
+          console.error('删除线路失败:', error);
+          alert('删除失败: ' + error.message);
+        }
+      }
+
+      // 事件监听器
+      if (btnNewLine) {
+        btnNewLine.addEventListener('click', () => {
+          // 切换到编辑视图（新建模式）
+          lineListView.style.display = 'none';
+          lineEditView.style.display = 'block';
+
+          // 更新编辑页面链接
+          if (lineEditLink) {
+            lineEditLink.href = 'line-edit.html';
+            lineEditLink.textContent = '创建新线路';
+          }
+        });
+      }
+
+      if (btnRefreshLines) {
+        btnRefreshLines.addEventListener('click', loadLines);
+      }
+
+      if (btnBackToList) {
+        btnBackToList.addEventListener('click', () => {
+          lineEditView.style.display = 'none';
+          lineListView.style.display = 'block';
+        });
+      }
+
+      if (searchLinesInput) {
+        searchLinesInput.addEventListener('input', filterLines);
+      }
+
+      // 初始加载
+      loadLines();
+    }
+
+    // 车站管理功能
+    function initStationManagement() {
+      const btnNewStation = document.getElementById('btn-new-station');
+      const btnRefreshStations = document.getElementById('btn-refresh-stations');
+      const btnBackToStationList = document.getElementById('btn-back-to-station-list');
+      const searchStationsInput = document.getElementById('search-stations');
+      const stationListView = document.getElementById('station-list-view');
+      const stationEditView = document.getElementById('station-edit-view');
+      const stationEditLink = document.getElementById('station-edit-link');
+
+      if (!btnNewStation) return; // 如果不在车站管理标签页，则跳过
+
+      let allStations = [];
+      let filteredStations = [];
+
+      // 加载车站列表
+      async function loadStations() {
+        try {
+          const response = await fetch('/api/stations');
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          allStations = await response.json();
+          filterStations();
+        } catch (error) {
+          console.error('加载车站列表失败:', error);
+          updateStationsTable([{ error: true, message: '加载失败: ' + error.message }]);
+        }
+      }
+
+      // 过滤车站
+      function filterStations() {
+        const searchTerm = searchStationsInput.value.toLowerCase().trim();
+        if (!searchTerm) {
+          filteredStations = allStations;
+        } else {
+          filteredStations = allStations.filter(station =>
+            (station.code && station.code.toLowerCase().includes(searchTerm)) ||
+            (station.name && station.name.toLowerCase().includes(searchTerm)) ||
+            (station.en_name && station.en_name.toLowerCase().includes(searchTerm))
+          );
+        }
+        updateStationsTable(filteredStations);
+      }
+
+      // 更新表格
+      function updateStationsTable(stations) {
+        const tbody = document.getElementById('stations-tbody');
+        if (!tbody) return;
+
+        if (stations.length === 0) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="padding: 40px; text-align: center; color: var(--muted);">
+                暂无车站数据
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        // 检查是否是错误对象
+        if (stations[0] && stations[0].error) {
+          tbody.innerHTML = `
+            <tr>
+              <td colspan="5" style="padding: 40px; text-align: center; color: var(--danger);">
+                ${stations[0].message || '加载车站列表失败'}
+              </td>
+            </tr>
+          `;
+          return;
+        }
+
+        let html = '';
+        stations.forEach(station => {
+          const coordText = (station.x || station.y || station.z) ?
+            `${station.x || 0}, ${station.y || 0}, ${station.z || 0}` : '未设置';
+          html += `
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 16px; color: var(--text);">
+                <strong>${station.code || ''}</strong>
+              </td>
+              <td style="padding: 16px; color: var(--text);">
+                ${station.name || ''}
+              </td>
+              <td style="padding: 16px; color: var(--text);">
+                ${station.en_name || '-'}
+              </td>
+              <td style="padding: 16px; color: var(--text); font-family: monospace; font-size: 13px;">
+                ${coordText}
+              </td>
+              <td style="padding: 16px;">
+                <div style="display: flex; gap: 8px;">
+                  <button class="btn-edit-station" data-code="${station.code}" style="padding: 6px 12px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">编辑</button>
+                  <button class="btn-delete-station" data-code="${station.code}" style="padding: 6px 12px; background: var(--danger); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px;">删除</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        });
+
+        tbody.innerHTML = html;
+
+        // 绑定编辑和删除按钮事件
+        tbody.querySelectorAll('.btn-edit-station').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const stationCode = btn.getAttribute('data-code');
+            editStation(stationCode);
+          });
+        });
+
+        tbody.querySelectorAll('.btn-delete-station').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const stationCode = btn.getAttribute('data-code');
+            deleteStation(stationCode);
+          });
+        });
+      }
+
+      // 编辑车站
+      function editStation(stationCode) {
+        // 切换到编辑视图
+        stationListView.style.display = 'none';
+        stationEditView.style.display = 'block';
+
+        // 更新编辑页面链接
+        if (stationEditLink) {
+          stationEditLink.href = `station-edit.html?code=${encodeURIComponent(stationCode)}`;
+          stationEditLink.textContent = `编辑车站: ${stationCode}`;
+        }
+      }
+
+      // 删除车站
+      async function deleteStation(stationCode) {
+        if (!confirm(`确定要删除车站 "${stationCode}" 吗？此操作不可恢复。`)) {
+          return;
+        }
+
+        try {
+          const response = await fetch(`/api/stations/${encodeURIComponent(stationCode)}`, {
+            method: 'DELETE'
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+
+          alert('车站删除成功');
+          loadStations(); // 重新加载列表
+        } catch (error) {
+          console.error('删除车站失败:', error);
+          alert('删除失败: ' + error.message);
+        }
+      }
+
+      // 事件监听器
+      if (btnNewStation) {
+        btnNewStation.addEventListener('click', () => {
+          // 切换到编辑视图（新建模式）
+          stationListView.style.display = 'none';
+          stationEditView.style.display = 'block';
+
+          // 更新编辑页面链接
+          if (stationEditLink) {
+            stationEditLink.href = 'station-edit.html';
+            stationEditLink.textContent = '创建新车站';
+          }
+        });
+      }
+
+      if (btnRefreshStations) {
+        btnRefreshStations.addEventListener('click', loadStations);
+      }
+
+      if (btnBackToStationList) {
+        btnBackToStationList.addEventListener('click', () => {
+          stationEditView.style.display = 'none';
+          stationListView.style.display = 'block';
+        });
+      }
+
+      if (searchStationsInput) {
+        searchStationsInput.addEventListener('input', filterStations);
+      }
+
+      // 初始加载
+      loadStations();
+    }
+
+    // 页面加载完成后初始化
+    document.addEventListener('DOMContentLoaded', async () => {
+      // 初始化API配置管理器
+      await ApiConfigManager.init();
+
+      // 设置系统设置事件监听器
+      setupSystemSettings();
+
+      // 加载统计数据
+      loadStats();
+
+      // 初始化线路管理
+      initLineManagement();
+
+      // 初始化车站管理
+      initStationManagement();
+    });
+  </script>
+</body>
+</html>

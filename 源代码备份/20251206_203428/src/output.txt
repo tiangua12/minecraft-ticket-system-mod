@@ -1,0 +1,4992 @@
+package com.easttown.ticketsystem.block;
+
+import net.minecraft.util.StringRepresentable;
+
+public enum GateType implements StringRepresentable {
+    IN("in"),       // 仅入站
+    OUT("out"),      // 仅出站
+    BIDIRECTIONAL("bidirectional");  // 双向
+    
+    private final String name;
+    
+    GateType(String name) {
+        this.name = name;
+    }
+    
+    @Override
+    public String getSerializedName() {
+        return name;
+    }
+}
+package com.easttown.ticketsystem.block;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.init.BlockEntityInit;
+import com.easttown.ticketsystem.init.ItemInit;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.ticks.TickPriority;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.SimpleWaterloggedBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityTicker;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.BooleanProperty;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.level.material.FluidState;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.EntityCollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraft.world.phys.AABB;
+import net.minecraftforge.network.NetworkHooks;
+
+import javax.annotation.Nullable;
+import java.util.Map;
+
+public class GateBlock extends BaseEntityBlock implements SimpleWaterloggedBlock {
+    public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+    public static final BooleanProperty OPEN = BooleanProperty.create("open");
+    public static final BooleanProperty WATERLOGGED = BlockStateProperties.WATERLOGGED;
+    
+    // 关闭状态下的碰撞箱（H形）
+    private static final Map<Direction, VoxelShape> CLOSED_SHAPES = Map.of(
+        Direction.NORTH, Shapes.or(
+            Block.box(0, 0, 0, 1, 32, 16),   // 左柱
+            Block.box(15, 0, 0, 16, 32, 16), // 右柱
+            Block.box(1, 0, 7, 15, 32, 8)    // 横梁
+        ),
+        Direction.SOUTH, Shapes.or(
+            Block.box(15, 0, 0, 16, 32, 16),
+            Block.box(0, 0, 0, 1, 32, 16),
+            Block.box(1, 0, 8, 15, 32, 9)
+        ),
+        Direction.EAST, Shapes.or(
+            Block.box(0, 0, 0, 16, 32, 1),
+            Block.box(0, 0, 15, 16, 32, 16),
+            Block.box(8, 0, 0, 9, 32, 16)
+        ),
+        Direction.WEST, Shapes.or(
+            Block.box(0, 0, 15, 16, 32, 16),
+            Block.box(0, 0, 0, 16, 32, 1),
+            Block.box(7, 0, 0, 8, 32, 16)
+        )
+    );
+
+    // 开启状态下的碰撞箱（只有两侧立柱）
+    private static final Map<Direction, VoxelShape> OPEN_SHAPES = Map.of(
+        Direction.NORTH, Shapes.or(
+            Block.box(0, 0, 0, 1, 32, 16),
+            Block.box(15, 0, 0, 16, 32, 16)
+        ),
+        Direction.SOUTH, Shapes.or(
+            Block.box(15, 0, 0, 16, 32, 16),
+            Block.box(0, 0, 0, 1, 32, 16)
+        ),
+        Direction.EAST, Shapes.or(
+            Block.box(0, 0, 0, 16, 32, 1),
+            Block.box(0, 0, 15, 16, 32, 16)
+        ),
+        Direction.WEST, Shapes.or(
+            Block.box(0, 0, 15, 16, 32, 16),
+            Block.box(0, 0, 0, 16, 32, 1)
+        )
+    );
+
+    public GateBlock(Properties properties) {
+        super(properties);
+        this.registerDefaultState(this.stateDefinition.any()
+                .setValue(FACING, Direction.NORTH)
+                .setValue(OPEN, false)
+                .setValue(WATERLOGGED, false));
+    }
+    
+    @Override
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        Direction direction = state.getValue(FACING);
+        boolean isOpen = state.getValue(OPEN);
+        
+        // 根据OPEN状态返回不同的碰撞箱
+        if (isOpen) {
+            return OPEN_SHAPES.get(direction);
+        } else {
+            return CLOSED_SHAPES.get(direction);
+        }
+    }
+
+    // 获取碰撞形状（只返回闸机主体的碰撞箱）
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        Direction direction = state.getValue(FACING);
+        boolean isOpen = state.getValue(OPEN);
+        
+        return isOpen ? OPEN_SHAPES.get(direction) : CLOSED_SHAPES.get(direction);
+    }
+    
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        FluidState fluidState = context.getLevel().getFluidState(context.getClickedPos());
+        return this.defaultBlockState()
+                .setValue(FACING, context.getHorizontalDirection().getOpposite())
+                .setValue(WATERLOGGED, fluidState.getType() == Fluids.WATER);
+    }
+    
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        builder.add(FACING, OPEN, WATERLOGGED);
+    }
+    
+    @Override
+    public FluidState getFluidState(BlockState state) {
+        return state.getValue(WATERLOGGED) ? Fluids.WATER.getSource(false) : super.getFluidState(state);
+    }
+    
+    @Override
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
+            InteractionHand hand, BlockHitResult hit) {
+        if (!level.isClientSide && player instanceof ServerPlayer serverPlayer) {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof GateBlockEntity gate) {
+                // 检查是否有管理员钥匙
+                boolean isAdmin = player.getItemInHand(hand).getItem() == ItemInit.ADMIN_KEY.get();
+                
+                if (isAdmin) {
+                    // 管理员打开配置界面
+                    gate.openConfigGui(serverPlayer);
+                    return InteractionResult.SUCCESS;
+                } else {
+                    // 普通玩家尝试通过闸机
+                    gate.tryPassThrough(player);
+                    return InteractionResult.SUCCESS;
+                }
+            }
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+    
+    @Override
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
+    
+    @Nullable
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return BlockEntityInit.GATE.get().create(pos, state);
+    }
+
+    @Nullable
+    @Override
+    public <T extends BlockEntity> BlockEntityTicker<T> getTicker(Level level, BlockState state, BlockEntityType<T> type) {
+        return level.isClientSide ? null : createTickerHelper(type, BlockEntityInit.GATE.get(), GateBlockEntity::tick);
+    }
+    
+    @Override
+    public void onPlace(BlockState state, Level level, BlockPos pos, BlockState oldState, boolean isMoving) {
+        super.onPlace(state, level, pos, oldState, isMoving);
+        
+        // 确保只在服务器端执行
+        if (!level.isClientSide) {
+            TicketSystemMod.LOGGER.info("闸机方块已放置于位置: " + pos);
+            
+            // 获取方块实体并初始化
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof GateBlockEntity gate) {
+                TicketSystemMod.LOGGER.info("闸机方块实体初始化完成");
+            } else {
+                TicketSystemMod.LOGGER.warn("闸机方块放置后未找到方块实体！位置: " + pos);
+            }
+        }
+    }
+    
+    // 添加闸机关闭的tick处理
+    @Override
+    public void tick(BlockState state, ServerLevel level, BlockPos pos, net.minecraft.util.RandomSource random) {
+        BlockEntity blockEntity = level.getBlockEntity(pos);
+        if (blockEntity instanceof GateBlockEntity gate) {
+            gate.closeGate();
+        }
+    }
+}
+package com.easttown.ticketsystem.block;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.init.BlockEntityInit;
+import com.easttown.ticketsystem.item.TicketItem;
+import com.easttown.ticketsystem.screen.GateConfigMenu;
+import com.easttown.ticketsystem.util.GateUtil;
+import net.minecraft.world.ticks.TickPriority;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.Connection;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraftforge.network.NetworkHooks;
+
+import javax.annotation.Nullable;
+import java.util.UUID;
+
+public class GateBlockEntity extends BlockEntity implements MenuProvider {
+    // 闸机配置属性
+    private String gateId = "G-" + UUID.randomUUID().toString().substring(0, 8);
+    private String stationId = "";
+    private GateType gateType = GateType.BIDIRECTIONAL;
+    private boolean allowReentry = false;
+    private int maxTravelMinutes = 1440; // 默认24小时
+    private boolean destroyTicket = true;
+    private boolean enabled = true; // 闸机是否启用
+    private Direction lastFacing = null;
+
+    // 状态变量
+    private long lastPassTime = 0;
+    private int cooldownTicks = 20; // 默认1秒冷却
+
+    // 玩家通行管理
+    private UUID currentPlayerId; // 当前正在通过的玩家
+    private int timeoutTicks = 0; // 超时计时器（1分钟=1200 ticks）
+    private static final String GATE_TAG_PREFIX = "ticketsystem_gate_"; // 玩家标签前缀
+
+    // AABB检测区域
+    private AABB entryDetectionArea; // 入站检测面（正面）
+    private AABB exitDetectionArea; // 出站检测面（背面）
+    private static final double DETECTION_THICKNESS = 0.1; // 检测面厚度
+
+    public GateBlockEntity(BlockPos pos, BlockState state) {
+        super(BlockEntityInit.GATE.get(), pos, state);
+    }
+
+    @Override
+    public Component getDisplayName() {
+        return Component.translatable("block.ticketsystem.gate");
+    }
+
+    @Nullable
+    @Override
+    public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+        return new GateConfigMenu(containerId, inventory, this);
+    }
+
+    public void openConfigGui(Player player) {
+        if (player instanceof ServerPlayer serverPlayer) {
+            NetworkHooks.openScreen(serverPlayer, this, buf -> {
+                buf.writeBlockPos(worldPosition);
+            });
+        }
+    }
+
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        updateDetectionAreas();
+        TicketSystemMod.LOGGER.info("闸机方块实体加载完成，位置: {}", worldPosition);
+    }
+
+    // 更新检测区域
+    private void updateDetectionAreas() {
+        if (level == null)
+            return;
+
+        Direction facing = getBlockState().getValue(GateBlock.FACING);
+
+        // 创建入站检测面（正面）
+        entryDetectionArea = createFacingAABB(worldPosition, facing, DETECTION_THICKNESS);
+
+        // 创建出站检测面（背面）
+        exitDetectionArea = createFacingAABB(worldPosition, facing.getOpposite(), DETECTION_THICKNESS);
+
+        // 调试日志
+        TicketSystemMod.LOGGER.debug("更新闸机检测区域 - 位置: {}, 朝向: {}", worldPosition, facing);
+        TicketSystemMod.LOGGER.debug("入站检测面: {}", entryDetectionArea);
+        TicketSystemMod.LOGGER.debug("出站检测面: {}", exitDetectionArea);
+    }
+
+    // 创建面向指定方向的AABB
+    private AABB createFacingAABB(BlockPos pos, Direction direction, double thickness) {
+        double minX = pos.getX();
+        double minY = pos.getY();
+        double minZ = pos.getZ();
+        double maxX = minX + 1;
+        double maxY = minY + 1;
+        double maxZ = minZ + 1;
+
+        return switch (direction) {
+            case NORTH -> new AABB(minX, minY, maxZ - thickness, maxX, maxY, maxZ);
+            case SOUTH -> new AABB(minX, minY, minZ, maxX, maxY, minZ + thickness);
+            case WEST -> new AABB(maxX - thickness, minY, minZ, maxX, maxY, maxZ);
+            case EAST -> new AABB(minX, minY, minZ, minX + thickness, maxY, maxZ);
+            case UP -> new AABB(minX, maxY - thickness, minZ, maxX, maxY, maxZ);
+            case DOWN -> new AABB(minX, minY, minZ, maxX, minY + thickness, maxZ);
+            default -> new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+        };
+    }
+
+    public void tryPassThrough(Player player) {
+        if (!enabled || !(level instanceof ServerLevel serverLevel))
+            return;
+
+        // 检查当前是否有玩家正在通过
+        if (currentPlayerId != null) {
+            player.displayClientMessage(Component.translatable("ticketsystem.gate.busy"), false);
+            TicketSystemMod.LOGGER.debug("闸机繁忙，已有玩家通过: {}", currentPlayerId);
+            return;
+        }
+
+        // 检查冷却时间
+        if (serverLevel.getGameTime() - lastPassTime < cooldownTicks) {
+            TicketSystemMod.LOGGER.debug("闸机冷却中，跳过处理");
+            return;
+        }
+
+        ItemStack heldItem = player.getMainHandItem();
+        GatePassResult result = checkTicket(heldItem, player);
+
+        if (result.success) {
+            TicketSystemMod.LOGGER.info("玩家 {} 使用有效车票，准备通过闸机", player.getName().getString());
+
+            // 设置当前玩家和超时计时器
+            currentPlayerId = player.getUUID();
+            timeoutTicks = 1200; // 1分钟超时
+            player.addTag(getPlayerTag());
+            handleSuccess(player, heldItem);
+        } else {
+            TicketSystemMod.LOGGER.info("玩家 {} 车票无效: {}", player.getName().getString(), result.reason);
+            handleFailure(player, result.reason);
+        }
+
+        lastPassTime = serverLevel.getGameTime();
+    }
+
+    private String getPlayerTag() {
+        return GATE_TAG_PREFIX + gateId;
+    }
+
+    private void resetGate() {
+        if (currentPlayerId != null) {
+            Player player = level.getPlayerByUUID(currentPlayerId);
+            if (player != null) {
+                player.removeTag(getPlayerTag());
+                TicketSystemMod.LOGGER.debug("移除玩家标签: {}", player.getName().getString());
+            }
+            currentPlayerId = null;
+        }
+        timeoutTicks = 0;
+    }
+
+    public static void tick(Level level, BlockPos pos, BlockState state, GateBlockEntity gate) {
+        if (level.isClientSide || !gate.enabled)
+            return;
+
+        // 更新检测区域
+        Direction currentFacing = state.getValue(GateBlock.FACING);
+        if (gate.lastFacing != currentFacing) {
+            gate.lastFacing = currentFacing;
+            gate.updateDetectionAreas();
+
+        }
+
+        // 处理超时
+        if (gate.timeoutTicks > 0) {
+            gate.timeoutTicks--;
+            if (gate.timeoutTicks <= 0) {
+                // 超时，重置闸机并关闭门
+                gate.resetGate();
+                if (state.getValue(GateBlock.OPEN)) {
+                    level.setBlock(pos, state.setValue(GateBlock.OPEN, false), 3);
+                    TicketSystemMod.LOGGER.info("超时关闭闸机: {}", pos);
+                }
+            }
+        }
+
+        // 检测玩家位置
+        if (gate.currentPlayerId != null) {
+            Player player = level.getPlayerByUUID(gate.currentPlayerId);
+            if (player == null) {
+                // 玩家不在线，重置
+                gate.resetGate();
+                TicketSystemMod.LOGGER.debug("玩家离线，重置闸机");
+                return;
+            }
+
+            // 使用AABB检测区域
+            gate.checkDetectionAreas(player);
+        }
+    }
+
+    private void checkDetectionAreas(Player player) {
+        if (player == null || level == null)
+            return;
+
+        // 检测入站面（正面）
+        if (entryDetectionArea != null && player.getBoundingBox().intersects(entryDetectionArea)) {
+            TicketSystemMod.LOGGER.debug("玩家 {} 接触入站检测面", player.getName().getString());
+
+            if (!player.getTags().contains(getPlayerTag())) {
+                // 非法闯入，关闭闸机并重置
+                level.setBlock(worldPosition, getBlockState().setValue(GateBlock.OPEN, false), 3);
+                resetGate();
+                handleFailure(player, "ticketsystem.gate.illegal_entry");
+                TicketSystemMod.LOGGER.info("非法闯入! 玩家 {} 没有有效标签", player.getName().getString());
+            }
+        }
+
+        // 检测出站面（背面）
+        if (exitDetectionArea != null && player.getBoundingBox().intersects(exitDetectionArea)) {
+            TicketSystemMod.LOGGER.debug("玩家 {} 接触出站检测面", player.getName().getString());
+
+            // 完成通过
+            player.removeTag(getPlayerTag());
+            resetGate();
+
+            // 延迟0.1秒关闭闸机
+            level.scheduleTick(worldPosition, getBlockState().getBlock(), 2, TickPriority.HIGH);
+            TicketSystemMod.LOGGER.info("玩家 {} 通过闸机，闸机将在0.1秒后关闭", player.getName().getString());
+        }
+    }
+
+    // 处理闸机关闭
+    public void closeGate() {
+        if (level != null && !level.isClientSide) {
+            BlockState state = getBlockState();
+            if (state.getValue(GateBlock.OPEN)) {
+                level.setBlock(worldPosition, state.setValue(GateBlock.OPEN, false), 3);
+                TicketSystemMod.LOGGER.debug("闸机关闭 - 位置: {}", worldPosition);
+            }
+        }
+    }
+
+    private GatePassResult checkTicket(ItemStack ticketStack, Player player) {
+        if (ticketStack.isEmpty() || !(ticketStack.getItem() instanceof TicketItem)) {
+            return new GatePassResult(false, "ticketsystem.gate.no_ticket");
+        }
+
+        CompoundTag ticketTag = ticketStack.getTag();
+        if (ticketTag == null) {
+            return new GatePassResult(false, "ticketsystem.gate.invalid_ticket");
+        }
+
+        // 1. 检查车票ID
+        UUID ticketId = GateUtil.getTicketId(ticketTag);
+        if (ticketId == null) {
+            return new GatePassResult(false, "ticketsystem.gate.invalid_ticket");
+        }
+
+        // 4. 获取车票状态
+        String status = ticketTag.getString("Status");
+        long issueTime = ticketTag.getLong("IssueTime");
+        String startStation = ticketTag.getString("StartStation");
+        String endStation = ticketTag.getString("Destination");
+
+        long currentTime = System.currentTimeMillis();
+        long travelTimeMinutes = (currentTime - issueTime) / 60000;
+
+        // 5. 检查车票是否过期
+        if (travelTimeMinutes > maxTravelMinutes) {
+            return new GatePassResult(false, "ticketsystem.gate.expired");
+        }
+
+        // 根据闸机类型执行不同检查
+        switch (gateType) {
+            case IN:
+                return checkInTicket(status, startStation, ticketTag);
+            case OUT:
+                return checkOutTicket(status, endStation, ticketTag);
+            case BIDIRECTIONAL:
+                return checkBidirectionalTicket(status, startStation, endStation, ticketTag);
+            default:
+                return new GatePassResult(false, "ticketsystem.gate.invalid_gate");
+        }
+    }
+
+    private GatePassResult checkInTicket(String status, String startStation, CompoundTag ticketTag) {
+        // 入站检查
+        if (status.equals(TicketItem.COMPLETED)) {
+            return new GatePassResult(false, "ticketsystem.gate.already_used");
+        }
+
+        if (status.equals(TicketItem.IN_USE)) {
+            return new GatePassResult(false, "ticketsystem.gate.in_use");
+        }
+
+        if (!startStation.equals(stationId)) {
+            return new GatePassResult(false, "ticketsystem.gate.wrong_start");
+        }
+
+        // 防止同站重复入站
+        if (ticketTag.contains("gate_id") && ticketTag.getString("gate_id").equals(gateId)) {
+            return new GatePassResult(false, "ticketsystem.gate.same_gate");
+        }
+
+        return new GatePassResult(true, "");
+    }
+
+    private GatePassResult checkOutTicket(String status, String endStation, CompoundTag ticketTag) {
+        // 出站检查
+        if (status.equals(TicketItem.UNUSED)) {
+            return new GatePassResult(false, "ticketsystem.gate.not_used");
+        }
+
+        if (status.equals(TicketItem.COMPLETED)) {
+            return new GatePassResult(false, "ticketsystem.gate.already_used");
+        }
+
+        if (!endStation.equals(stationId)) {
+            return new GatePassResult(false, "ticketsystem.gate.wrong_end");
+        }
+
+        // 防止同站重复出站
+        if (ticketTag.contains("exit_gate_id") && ticketTag.getString("exit_gate_id").equals(gateId)) {
+            return new GatePassResult(false, "ticketsystem.gate.same_gate");
+        }
+
+        return new GatePassResult(true, "");
+    }
+
+    private GatePassResult checkBidirectionalTicket(String status, String startStation, String endStation,
+            CompoundTag ticketTag) {
+        if (status.equals(TicketItem.IN_USE)) {
+            // 已使用票作为出站
+            if (!endStation.equals(stationId)) {
+                return new GatePassResult(false, "ticketsystem.gate.wrong_end");
+            }
+            return new GatePassResult(true, "");
+        } else if (status.equals(TicketItem.UNUSED)) {
+            // 未使用票作为入站
+            if (!startStation.equals(stationId)) {
+                return new GatePassResult(false, "ticketsystem.gate.wrong_start");
+            }
+            return new GatePassResult(true, "");
+        }
+        return new GatePassResult(false, "ticketsystem.gate.invalid_status");
+    }
+
+    private void handleSuccess(Player player, ItemStack ticketStack) {
+        // 设置闸机为开启状态
+        BlockState state = getBlockState();
+        if (state.getValue(GateBlock.OPEN)) {
+            // 如果已经是开启状态，先关闭再打开，确保动画播放
+            level.setBlock(worldPosition, state.setValue(GateBlock.OPEN, false), 3);
+        }
+        level.setBlock(worldPosition, state.setValue(GateBlock.OPEN, true), 3);
+        TicketSystemMod.LOGGER.info("闸机开启: {}", worldPosition);
+
+        // 处理车票
+        CompoundTag ticketTag = ticketStack.getOrCreateTag();
+        boolean isInGate = gateType == GateType.IN ||
+                (gateType == GateType.BIDIRECTIONAL && ticketTag.getString("Status").equals(TicketItem.UNUSED));
+
+        if (isInGate) {
+            // 入站处理 - 更新车票状态（注意：旅行计时在通过闸机后才开始）
+            ticketTag.putString("Status", TicketItem.IN_USE);
+            ticketTag.putString("EntryGate", gateId);
+        } else {
+            // 出站处理
+            ticketTag.putString("Status", TicketItem.COMPLETED);
+            ticketTag.putString("ExitGate", gateId);
+            ticketTag.putLong("ExitTime", System.currentTimeMillis());
+
+            // 是否销毁车票
+            if (destroyTicket) {
+                ticketStack.shrink(1);
+            }
+        }
+    }
+
+    private void handleFailure(Player player, String reasonKey) {
+        // 发送失败消息
+        player.displayClientMessage(Component.translatable(reasonKey), false);
+    }
+
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        tag.putString("GateId", gateId);
+        tag.putString("StationId", stationId);
+        tag.putString("GateType", gateType.name());
+        tag.putBoolean("AllowReentry", allowReentry);
+        tag.putInt("MaxTravelMinutes", maxTravelMinutes);
+        tag.putBoolean("DestroyTicket", destroyTicket);
+        tag.putBoolean("Enabled", enabled);
+        if (currentPlayerId != null) {
+            tag.putUUID("CurrentPlayer", currentPlayerId);
+        }
+        tag.putInt("TimeoutTicks", timeoutTicks);
+    }
+
+    @Override
+    public void load(CompoundTag tag) {
+        super.load(tag);
+        gateId = tag.getString("GateId");
+        stationId = tag.getString("StationId");
+        gateType = GateType.valueOf(tag.getString("GateType"));
+        allowReentry = tag.getBoolean("AllowReentry");
+        maxTravelMinutes = tag.getInt("MaxTravelMinutes");
+        destroyTicket = tag.getBoolean("DestroyTicket");
+        enabled = tag.getBoolean("Enabled");
+        if (tag.hasUUID("CurrentPlayer")) {
+            currentPlayerId = tag.getUUID("CurrentPlayer");
+        }
+        timeoutTicks = tag.getInt("TimeoutTicks");
+    }
+
+    @Override
+    public CompoundTag getUpdateTag() {
+        CompoundTag tag = super.getUpdateTag();
+        saveAdditional(tag);
+        return tag;
+    }
+
+    @Nullable
+    @Override
+    public Packet<ClientGamePacketListener> getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public void onDataPacket(Connection net, ClientboundBlockEntityDataPacket pkt) {
+        super.onDataPacket(net, pkt);
+        handleUpdateTag(pkt.getTag());
+    }
+
+    // 闸机配置方法
+    public String getGateId() {
+        return gateId;
+    }
+
+    public void setGateId(String gateId) {
+        this.gateId = gateId;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public String getStationId() {
+        return stationId;
+    }
+
+    public void setStationId(String stationId) {
+        this.stationId = stationId;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public GateType getGateType() {
+        return gateType;
+    }
+
+    public void setGateType(GateType gateType) {
+        this.gateType = gateType;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public boolean isAllowReentry() {
+        return allowReentry;
+    }
+
+    public void setAllowReentry(boolean allowReentry) {
+        this.allowReentry = allowReentry;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public int getMaxTravelMinutes() {
+        return maxTravelMinutes;
+    }
+
+    public void setMaxTravelMinutes(int maxTravelMinutes) {
+        this.maxTravelMinutes = maxTravelMinutes;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public boolean isDestroyTicket() {
+        return destroyTicket;
+    }
+
+    public void setDestroyTicket(boolean destroyTicket) {
+        this.destroyTicket = destroyTicket;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+
+    public boolean isEnabled() {
+        return enabled;
+    }
+
+    public void setEnabled(boolean enabled) {
+        this.enabled = enabled;
+        setChanged();
+        if (level != null) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+}
+
+class GatePassResult {
+    public final boolean success;
+    public final String reason;
+
+    public GatePassResult(boolean success, String reason) {
+        this.success = success;
+        this.reason = reason;
+    }
+}
+package com.easttown.ticketsystem.block;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.LivingEntity;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.BlockGetter;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.LevelAccessor;
+import net.minecraft.world.level.LevelReader;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.Blocks;
+import net.minecraft.world.level.block.EntityBlock;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.LevelEvent;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.level.block.state.properties.DoubleBlockHalf;
+import net.minecraft.world.level.material.Fluids;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.VoxelShape;
+import net.minecraftforge.network.NetworkHooks;
+import com.easttown.ticketsystem.util.DebugLogger;
+
+import javax.annotation.Nullable;
+
+public class ReissueMachineBlock extends Block implements EntityBlock {
+    public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+    public static final net.minecraft.world.level.block.state.properties.EnumProperty<DoubleBlockHalf> HALF = BlockStateProperties.DOUBLE_BLOCK_HALF;
+
+    // 下半部分碰撞箱（完整高度）
+    private static final VoxelShape SHAPE_LOWER = Block.box(0, 0, 0, 16, 32, 16);
+    // 上半部分碰撞箱（相对于下半部分的位置）
+    private static final VoxelShape SHAPE_UPPER = Block.box(0, -16, 0, 16, 16, 16);
+
+    public ReissueMachineBlock(BlockBehaviour.Properties properties) {
+        super(properties);
+        this.registerDefaultState(this.stateDefinition.any()
+            .setValue(FACING, Direction.NORTH)
+            .setValue(HALF, DoubleBlockHalf.LOWER));
+    }
+
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder);
+        builder.add(FACING, HALF);
+    }
+
+    // 放置逻辑
+    @Nullable
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        BlockPos clickedPos = context.getClickedPos();
+        Level level = context.getLevel();
+
+        // 检查上方空间是否可用
+        if (clickedPos.getY() < level.getMaxBuildHeight() - 1 &&
+            level.getBlockState(clickedPos.above()).canBeReplaced(context)) {
+            return this.defaultBlockState()
+                .setValue(FACING, context.getHorizontalDirection().getOpposite())
+                .setValue(HALF, DoubleBlockHalf.LOWER);
+        } else {
+            return null; // 放置失败
+        }
+    }
+
+    // 自动创建上半部分
+    @Override
+    public void setPlacedBy(Level level, BlockPos pos, BlockState state,
+                           LivingEntity entity, ItemStack stack) {
+        // 在下方位置的上方放置上半部分
+        level.setBlock(pos.above(), state.setValue(HALF, DoubleBlockHalf.UPPER), 3);
+    }
+
+    // 生存检查机制
+    @Override
+    public boolean canSurvive(BlockState state, LevelReader level, BlockPos pos) {
+        BlockPos belowPos = pos.below();
+        BlockState belowState = level.getBlockState(belowPos);
+
+        if (state.getValue(HALF) == DoubleBlockHalf.LOWER) {
+            // 下半部分：需要下方有坚固的支撑面
+            return belowState.isFaceSturdy(level, belowPos, Direction.UP);
+        } else {
+            // 上半部分：需要下方是同一方块的下半部分
+            return belowState.is(this) && belowState.getValue(HALF) == DoubleBlockHalf.LOWER;
+        }
+    }
+
+    // 方块更新同步
+    @Override
+    public BlockState updateShape(BlockState state, Direction facing, BlockState facingState,
+                                 LevelAccessor level, BlockPos currentPos, BlockPos facingPos) {
+        DoubleBlockHalf blockHalf = state.getValue(HALF);
+
+        // 处理垂直方向的更新（上下部分连接处）
+        if (facing.getAxis() == Direction.Axis.Y &&
+            blockHalf == DoubleBlockHalf.LOWER == (facing == Direction.UP)) {
+
+            boolean condition = facingState.is(this) && facingState.getValue(HALF) != blockHalf;
+            return condition ?
+                state.setValue(FACING, facingState.getValue(FACING)) :
+                Blocks.AIR.defaultBlockState(); // 如果另一半丢失，破坏当前部分
+        } else {
+            // 下半部分检查下方支撑
+            boolean condition = blockHalf == DoubleBlockHalf.LOWER &&
+                               facing == Direction.DOWN &&
+                               !state.canSurvive(level, currentPos);
+            return condition ? Blocks.AIR.defaultBlockState() :
+                   super.updateShape(state, facing, facingState, level, currentPos, facingPos);
+        }
+    }
+
+    // 破坏连锁反应
+    @Override
+    public void playerWillDestroy(Level level, BlockPos pos, BlockState state, Player player) {
+        DoubleBlockHalf value = state.getValue(HALF);
+        BlockPos otherPos = value == DoubleBlockHalf.LOWER ? pos.above() : pos.below();
+        BlockState otherState = level.getBlockState(otherPos);
+
+        if (otherState.is(this) && otherState.getValue(HALF) != value) {
+            if (!level.isClientSide) {
+                if (player.isCreative()) {
+                    // 创造模式：直接破坏另一部分，不产生掉落
+                    level.setBlock(otherPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_SUPPRESS_DROPS | Block.UPDATE_ALL);
+                } else {
+                    // 生存模式：只在下半部分产生掉落，避免重复掉落
+                    if (value == DoubleBlockHalf.LOWER) {
+                        // 破坏下半部分时，上半部分自动破坏但不产生掉落
+                        level.setBlock(otherPos, Blocks.AIR.defaultBlockState(), Block.UPDATE_SUPPRESS_DROPS | Block.UPDATE_ALL);
+                    } else {
+                        // 破坏上半部分时，下半部分保留，不产生额外掉落
+                        level.setBlock(otherPos, otherState, Block.UPDATE_SUPPRESS_DROPS | Block.UPDATE_ALL);
+                    }
+                }
+            }
+        }
+
+        super.playerWillDestroy(level, pos, state, player);
+    }
+
+    // 碰撞箱管理
+    @Override
+    public VoxelShape getShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        if (state.getValue(HALF) == DoubleBlockHalf.LOWER) {
+            return SHAPE_LOWER; // 完整高度的碰撞箱
+        } else {
+            return SHAPE_UPPER; // 上半部分较矮的碰撞箱
+        }
+    }
+
+    @Override
+    public VoxelShape getCollisionShape(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context) {
+        return getShape(state, level, pos, context);
+    }
+
+    // 交互逻辑
+    @Override
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
+            InteractionHand hand, BlockHitResult hit) {
+
+        // 统一使用下半部分的位置进行方块实体操作
+        BlockPos tePos = state.getValue(HALF) == DoubleBlockHalf.LOWER ? pos : pos.below();
+        BlockEntity blockEntity = level.getBlockEntity(tePos);
+
+        if (blockEntity instanceof ReissueMachineBlockEntity terminal) {
+            DebugLogger.info("方块使用 - 位置: {}, 客户端: {}", tePos, level.isClientSide());
+
+            if (level.isClientSide()) {
+                // 客户端直接打开界面
+                terminal.openScreen(player);
+            } else if (player instanceof ServerPlayer serverPlayer) {
+                // 服务端打开界面
+                NetworkHooks.openScreen(serverPlayer, terminal, tePos);
+            }
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    // 方块实体集成
+    @Nullable
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        // 只在下半部分创建方块实体
+        if (state.getValue(HALF) == DoubleBlockHalf.LOWER) {
+            return new ReissueMachineBlockEntity(pos, state);
+        }
+        return null;
+    }
+}package com.easttown.ticketsystem.block;
+
+import com.easttown.ticketsystem.init.BlockEntityInit;
+import com.easttown.ticketsystem.init.MenuInit;
+import net.minecraft.core.BlockPos;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.Connection;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+
+public class ReissueMachineBlockEntity extends BlockEntity implements MenuProvider {
+
+    public ReissueMachineBlockEntity(BlockPos pos, BlockState state) {
+        super(BlockEntityInit.REISSUE_MACHINE.get(), pos, state);
+    }
+
+    // MenuProvider接口实现
+    @Override
+    public Component getDisplayName() {
+        return Component.literal("补票机器");
+    }
+
+    @Override
+    public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+        // 返回主菜单容器
+        return new com.easttown.ticketsystem.screen.terminal.menu.TerminalMainMenu(containerId, inventory, this);
+    }
+
+    // 客户端打开屏幕的方法
+    public void openScreen(Player player) {
+        if (player.level().isClientSide()) {
+            // 直接打开主菜单界面
+            player.openMenu(this);
+        }
+    }
+
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        // 极简版本，不需要保存额外数据
+    }
+
+    @Override
+    public void load(CompoundTag tag) {
+        super.load(tag);
+        // 极简版本，不需要加载额外数据
+    }
+
+    // 数据同步方法
+    @Override
+    public CompoundTag getUpdateTag() {
+        CompoundTag tag = super.getUpdateTag();
+        saveAdditional(tag);
+        return tag;
+    }
+
+    @Override
+    public void handleUpdateTag(CompoundTag tag) {
+        super.handleUpdateTag(tag);
+        load(tag);
+    }
+
+    @Override
+    public Packet<ClientGamePacketListener> getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+
+    @Override
+    public void onDataPacket(Connection net, ClientboundBlockEntityDataPacket pkt) {
+        super.onDataPacket(net, pkt);
+        CompoundTag tag = pkt.getTag();
+        if (tag != null) {
+            handleUpdateTag(tag);
+        }
+    }
+}package com.easttown.ticketsystem.block;
+
+import com.easttown.ticketsystem.init.ItemInit;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.context.BlockPlaceContext;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.BaseEntityBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.RenderShape;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.StateDefinition;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.DirectionProperty;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraftforge.network.NetworkHooks;
+
+import javax.annotation.Nullable;
+
+public class TicketMachineBlock extends BaseEntityBlock {
+    // 1. 添加方向属性
+    public static final DirectionProperty FACING = BlockStateProperties.HORIZONTAL_FACING;
+
+    public TicketMachineBlock(BlockBehaviour.Properties properties) {
+        super(properties);
+        // 2. 注册默认状态（朝北）
+        this.registerDefaultState(this.stateDefinition.any().setValue(FACING, Direction.NORTH));
+    }
+
+    // 3. 将方向属性添加到状态定义
+    @Override
+    protected void createBlockStateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+        super.createBlockStateDefinition(builder);
+        builder.add(FACING);
+    }
+
+    // 4. 设置放置时的方向（根据玩家朝向）
+    @Nullable
+    @Override
+    public BlockState getStateForPlacement(BlockPlaceContext context) {
+        return this.defaultBlockState().setValue(FACING, context.getHorizontalDirection().getOpposite());
+    }
+
+    // 以下原有方法保持不变 ▼▼▼
+    
+    @Override
+    public InteractionResult use(BlockState state, Level level, BlockPos pos, Player player,
+            InteractionHand hand, BlockHitResult hit) {
+        if (!level.isClientSide && player instanceof ServerPlayer serverPlayer) {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof TicketMachineBlockEntity ticketMachine) {
+                // 计算相对点击位置
+                double hitX = hit.getLocation().x - pos.getX();
+                double hitY = hit.getLocation().y - pos.getY();
+                double hitZ = hit.getLocation().z - pos.getZ();
+
+                boolean isAdmin = player.getItemInHand(hand).getItem() == ItemInit.ADMIN_KEY.get();
+
+                NetworkHooks.openScreen(serverPlayer, ticketMachine, buf -> {
+                    buf.writeBlockPos(pos);
+                    buf.writeBoolean(isAdmin);
+                    buf.writeDouble(hitX);
+                    buf.writeDouble(hitY);
+                    buf.writeDouble(hitZ);
+                });
+            }
+        }
+        return InteractionResult.sidedSuccess(level.isClientSide);
+    }
+
+    @Override
+    public RenderShape getRenderShape(BlockState state) {
+        return RenderShape.MODEL;
+    }
+
+    @Nullable
+    @Override
+    public BlockEntity newBlockEntity(BlockPos pos, BlockState state) {
+        return new TicketMachineBlockEntity(pos, state);
+    }
+
+    @Override
+    public void onRemove(BlockState state, Level level, BlockPos pos, BlockState newState, boolean isMoving) {
+        if (!state.is(newState.getBlock())) {
+            BlockEntity blockEntity = level.getBlockEntity(pos);
+            if (blockEntity instanceof TicketMachineBlockEntity ticketMachine) {
+                ticketMachine.dropContents(level, pos);
+                level.updateNeighbourForOutputSignal(pos, this);
+            }
+            super.onRemove(state, level, pos, newState, isMoving);
+        }
+    }
+}
+package com.easttown.ticketsystem.block;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.init.BlockEntityInit;
+import com.easttown.ticketsystem.init.ItemInit;
+import com.easttown.ticketsystem.init.MenuInit;
+import com.easttown.ticketsystem.manager.CoinSystem;
+import com.easttown.ticketsystem.manager.PriceCalculator;
+import com.easttown.ticketsystem.screen.TicketMachineMenu;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.Connection;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.protocol.Packet;
+import net.minecraft.network.protocol.game.ClientGamePacketListener;
+import net.minecraft.network.protocol.game.ClientboundBlockEntityDataPacket;
+import net.minecraft.world.Containers;
+import net.minecraft.world.MenuProvider;
+import net.minecraft.world.SimpleContainer;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerData;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraftforge.common.capabilities.Capability;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.common.util.LazyOptional;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.ItemStackHandler;
+import net.minecraft.resources.ResourceLocation;
+
+import javax.annotation.Nonnull;
+import javax.annotation.Nullable;
+import java.util.*;
+
+public class TicketMachineBlockEntity extends BlockEntity implements MenuProvider {
+    private final ItemStackHandler itemHandler = new ItemStackHandler(1) {
+        @Override
+        protected void onContentsChanged(int slot) {
+            setChanged();
+            if (level != null && !level.isClientSide) {
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            }
+        }
+        
+        @Override
+        public boolean isItemValid(int slot, @Nonnull ItemStack stack) {
+            return false;
+        }
+        
+        @Override
+        public ItemStack extractItem(int slot, int amount, boolean simulate) {
+            ItemStack stack = super.extractItem(slot, amount, simulate);
+            if (!simulate) {
+                setChanged();
+                if (level != null) {
+                    level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+                }
+            }
+            return stack;
+        }
+    };
+    
+    private final ContainerData data = new ContainerData() {
+        @Override
+        public int get(int index) { return 0; }
+        @Override
+        public void set(int index, int value) {}
+        @Override
+        public int getCount() { return 0; }
+    };
+    
+    private LazyOptional<IItemHandler> lazyItemHandler = LazyOptional.empty();
+    private String startStation = "";
+    
+    // 硬币存储系统
+    private final Map<String, Integer> storedCoins = new HashMap<>();
+
+    public TicketMachineBlockEntity(BlockPos pos, BlockState state) {
+        super(BlockEntityInit.TICKET_MACHINE.get(), pos, state);
+    }
+    
+    @Override
+    public Component getDisplayName() {
+        return Component.translatable("block.ticketsystem.ticket_machine");
+    }
+    
+    @Nullable
+    @Override
+    public AbstractContainerMenu createMenu(int containerId, Inventory inventory, Player player) {
+        return new TicketMachineMenu(containerId, inventory, this, player.getItemInHand(player.getUsedItemHand()).getItem() == ItemInit.ADMIN_KEY.get());
+    }
+    
+    @Nonnull
+    @Override
+    public <T> LazyOptional<T> getCapability(@Nonnull Capability<T> cap, @Nullable Direction side) {
+        if (cap == ForgeCapabilities.ITEM_HANDLER) {
+            return lazyItemHandler.cast();
+        }
+        return super.getCapability(cap, side);
+    }
+    
+    @Override
+    public void onLoad() {
+        super.onLoad();
+        lazyItemHandler = LazyOptional.of(() -> itemHandler);
+    }
+    
+    @Override
+    public void invalidateCaps() {
+        super.invalidateCaps();
+        lazyItemHandler.invalidate();
+    }
+    
+    @Override
+    protected void saveAdditional(CompoundTag tag) {
+        super.saveAdditional(tag);
+        tag.put("inventory", itemHandler.serializeNBT());
+        tag.putString("StartStation", startStation);
+        
+        // 保存硬币存储
+        CompoundTag coinsTag = new CompoundTag();
+        for (Map.Entry<String, Integer> entry : storedCoins.entrySet()) {
+            coinsTag.putInt(entry.getKey(), entry.getValue());
+        }
+        tag.put("StoredCoins", coinsTag);
+    }
+    
+    @Override
+    public void load(CompoundTag tag) {
+        super.load(tag);
+        itemHandler.deserializeNBT(tag.getCompound("inventory"));
+        startStation = tag.getString("StartStation");
+        
+        // 加载硬币存储
+        storedCoins.clear();
+        CompoundTag coinsTag = tag.getCompound("StoredCoins");
+        for (String key : coinsTag.getAllKeys()) {
+            storedCoins.put(key, coinsTag.getInt(key));
+        }
+    }
+    
+    public void setStartStation(String station) {
+        if (station != null && !station.isEmpty() && !station.equals(startStation)) {
+            startStation = station;
+            setChanged();
+            if (level != null) {
+                level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+            }
+        }
+    }
+    
+    public String getStartStation() {
+        return startStation;
+    }
+    
+    public boolean canPrintTicket() {
+        return itemHandler.getStackInSlot(0).isEmpty();
+    }
+    
+    public void printTicket(String destination) {
+        if (startStation.isEmpty() || destination.isEmpty()) return;
+        
+        ItemStack ticket = new ItemStack(ItemInit.TICKET.get());
+        CompoundTag tag = new CompoundTag();
+        
+        // 添加车票详细信息
+        tag.putString("TicketId", UUID.randomUUID().toString());
+        tag.putString("StartStation", startStation);
+        tag.putString("Destination", destination);
+        tag.putLong("IssueTime", System.currentTimeMillis());
+        tag.putInt("Price", PriceCalculator.calculatePrice(startStation, destination));
+        tag.putString("Status", "UNUSED"); // 初始状态为未使用
+        
+        ticket.setTag(tag);
+        
+        itemHandler.setStackInSlot(0, ticket);
+        setChanged();
+        
+        if (level != null && !level.isClientSide) {
+            level.sendBlockUpdated(worldPosition, getBlockState(), getBlockState(), 3);
+        }
+    }
+    
+    public void dropContents(Level level, BlockPos pos) {
+        SimpleContainer inventory = new SimpleContainer(itemHandler.getSlots());
+        for (int i = 0; i < itemHandler.getSlots(); i++) {
+            inventory.setItem(i, itemHandler.getStackInSlot(i));
+        }
+        Containers.dropContents(level, pos, inventory);
+        
+        // 同时掉落存储的硬币
+        if (!storedCoins.isEmpty()) {
+            for (Map.Entry<String, Integer> entry : storedCoins.entrySet()) {
+                Item coin = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(entry.getKey()));
+                if (coin != null) {
+                    int count = entry.getValue();
+                    while (count > 0) {
+                        int amount = Math.min(count, coin.getMaxStackSize());
+                        Containers.dropItemStack(level, pos.getX(), pos.getY(), pos.getZ(), new ItemStack(coin, amount));
+                        count -= amount;
+                    }
+                }
+            }
+        }
+    }
+    
+    // 添加硬币到存储
+    public void addCoins(Map<String, Integer> coins) {
+        for (Map.Entry<String, Integer> entry : coins.entrySet()) {
+            String coinId = entry.getKey();
+            int amount = entry.getValue();
+            storedCoins.put(coinId, storedCoins.getOrDefault(coinId, 0) + amount);
+        }
+        setChanged();
+    }
+    
+    // 取出所有存储的硬币
+    public Map<String, Integer> withdrawCoins() {
+        Map<String, Integer> coins = new HashMap<>(storedCoins);
+        storedCoins.clear();
+        setChanged();
+        return coins;
+    }
+    
+    // 获取存储的硬币
+    public Map<String, Integer> getStoredCoins() {
+        return Collections.unmodifiableMap(storedCoins);
+    }
+    
+    // 获取硬币总价值（以铜币为单位）
+    public int getTotalCopperValue() {
+        int total = 0;
+        for (Map.Entry<String, Integer> entry : storedCoins.entrySet()) {
+            String coinId = entry.getKey();
+            int amount = entry.getValue();
+            int valuePerCoin = CoinSystem.getCoinValue(coinId);
+            total += valuePerCoin * amount;
+        }
+        return total;
+    }
+    
+    @Override
+    public CompoundTag getUpdateTag() {
+        CompoundTag tag = super.getUpdateTag();
+        saveAdditional(tag);
+        return tag;
+    }
+    
+    @Override
+    public Packet<ClientGamePacketListener> getUpdatePacket() {
+        return ClientboundBlockEntityDataPacket.create(this);
+    }
+    
+    @Override
+    public void onDataPacket(Connection net, ClientboundBlockEntityDataPacket pkt) {
+        super.onDataPacket(net, pkt);
+        handleUpdateTag(pkt.getTag());
+    }
+}
+package com.easttown.ticketsystem.client;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.manager.StationManager;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.AbstractSelectionList;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.narration.NarratedElementType;
+import net.minecraft.network.chat.Component;
+
+import java.util.*;
+import java.util.function.Consumer;
+
+public abstract class BaseStationList 
+    extends AbstractSelectionList<BaseStationList.StationEntry> {
+    
+    // 颜色常量
+    protected static final int BACKGROUND = 0xFFE0F7FA;
+    protected static final int NORMAL_BG = 0xFFB3E5FC;
+    protected static final int SELECTED_BG = 0xFF03A9F4;
+    protected static final int HOVER_BG = 0xFF81D4FA;
+    protected static final int START_BG = 0xFFB2EBF2;
+    protected static final int DISABLED_BG = 0xFFEEEEEE;
+    protected static final int NORMAL_TEXT = 0xFF01579B;
+    protected static final int SELECTED_TEXT = 0xFFFFFFFF;
+    protected static final int DISABLED_TEXT = 0xFF80DEEA;
+    protected static final int START_TEXT = 0xFF81D4FA;
+    
+    protected final StationListProvider provider;
+    protected final List<String> stations = new ArrayList<>();
+    protected int listX, listY, listWidth, listHeight;
+    
+    // 分页状态
+    protected int currentPage = 0;
+    protected int itemsPerPage;
+protected int totalPages = 1;
+    
+    protected boolean visible = true;
+    
+    // 选择状态
+    protected String selectedStation = "";
+    protected int selectedIndex = -1;
+    
+    // 滚动条状态 (已移除)
+    protected int scrollbarWidth = 6;
+    protected int scrollbarMargin = 2;
+    
+    // 点击监听器
+    private Consumer<String> clickListener;
+
+    public BaseStationList(StationListProvider provider, 
+                         int x, int y, int width, int height) {
+        super(
+            Minecraft.getInstance(), 
+            width,
+            height,
+            y,
+            y + height,
+            20
+        );
+        this.provider = provider;
+        this.listX = x;
+        this.listY = y;
+        this.listWidth = width;
+        this.listHeight = height;
+        this.setLeftPos(x);
+        
+        // 计算每页显示的项目数量
+        this.itemsPerPage = Math.max(1, height / this.itemHeight);
+    }
+    
+    // 设置点击监听器
+    public void setOnClick(Consumer<String> listener) {
+        this.clickListener = listener;
+    }
+    
+    // 设置选中的车站
+    public void setSelectedStation(String station) {
+        this.selectedStation = station;
+        if (provider != null) {
+            provider.setSelectedStation(station);
+        }
+        updateSelectionIndex();
+    }
+    
+    // 获取选中的车站
+    public String getSelectedStation() {
+        return selectedStation;
+    }
+    
+    // 更新选中索引
+    private void updateSelectionIndex() {
+        this.selectedIndex = stations.indexOf(selectedStation);
+    }
+    
+    public void setVisible(boolean visible) {
+        this.visible = visible;
+    }
+    
+    public void setPosition(int x, int y, int width, int height) {
+        this.listX = x;
+        this.listY = y;
+        this.listWidth = width;
+        this.listHeight = height;
+        this.setLeftPos(x);
+        this.y0 = y;
+        this.y1 = y + height;
+        this.width = width;
+        this.height = height;
+        
+        // 重新计算每页显示的项目数量
+        this.itemsPerPage = Math.max(1, height / this.itemHeight);
+        updateTotalPages();
+    }
+    
+    public void refreshStations(String filter) {
+        this.clearEntries();
+        Set<String> allStations = StationManager.getStations();
+        stations.clear();
+        
+        for (String station : allStations) {
+            if (filter.isEmpty() || station.toLowerCase().contains(filter.toLowerCase())) {
+                stations.add(station);
+            }
+        }
+        Collections.sort(stations);
+        
+        // 更新总页数
+        updateTotalPages();
+        
+        // 确保当前页在有效范围内
+        currentPage = Math.max(0, Math.min(currentPage, totalPages - 1));
+        
+        // 添加当前页的条目
+        int startIndex = currentPage * itemsPerPage;
+        int endIndex = Math.min(startIndex + itemsPerPage, stations.size());
+        
+        for (int i = startIndex; i < endIndex; i++) {
+            String station = stations.get(i);
+            this.addEntry(createEntry(station));
+        }
+        
+        // 更新选中索引
+        updateSelectionIndex();
+    }
+    
+    private void updateTotalPages() {
+        totalPages = stations.isEmpty() ? 1 : (int) Math.ceil((double) stations.size() / itemsPerPage);
+    }
+    
+    protected abstract StationEntry createEntry(String station);
+    
+    protected abstract boolean canSelectStation(String station);
+    
+    @Override
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        if (!visible) return;
+        
+        // 绘制背景
+        guiGraphics.fill(
+            this.x0, this.y0, 
+            this.x0 + this.width, this.y0 + this.height, 
+            BACKGROUND
+        );
+        
+        // 绘制边框
+        guiGraphics.renderOutline(
+            this.x0, this.y0, 
+            this.getWidth(), this.getHeight(), 
+            0xFF03A9F4
+        );
+        
+        // 绘制当前页的条目
+        int startIndex = currentPage * itemsPerPage;
+        int endIndex = Math.min(startIndex + itemsPerPage, stations.size());
+        
+        for (int i = startIndex; i < endIndex; i++) {
+            int displayIndex = i - startIndex;
+            StationEntry entry = this.getEntry(displayIndex);
+            int yPos = this.y0 + (displayIndex * getItemHeight());
+            
+            if (yPos >= this.y0 && yPos + getItemHeight() <= this.y1) {
+                boolean isHovered = isMouseOver(mouseX, mouseY) && 
+                                   mouseY >= yPos && mouseY < yPos+ getItemHeight();
+                boolean isSelected = stations.get(i).equals(selectedStation);
+                
+                entry.render(
+                    guiGraphics, 
+                    i, 
+                    yPos, 
+                    this.x0, 
+                    this.getWidth(),
+                    getItemHeight(), 
+                    mouseX, 
+                    mouseY, 
+                    isHovered,
+                    partialTicks
+                );
+            }
+        }
+    }
+    
+    @Override
+    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+        if (!visible) return false;
+        
+        // 处理车站选择
+        if (button == 0 && mouseX >= this.x0 && mouseX <= this.x0 + this.width && 
+            mouseY >= this.y0 && mouseY <= this.y0 + this.height) {
+            
+            int relativeY = (int) (mouseY - this.y0);
+            int index = relativeY / getItemHeight();
+            int actualIndex = currentPage * itemsPerPage + index;
+            
+            if (actualIndex >= 0 && actualIndex < stations.size()) {
+                String station = stations.get(actualIndex);
+                if (canSelectStation(station)) {
+                    setSelectedStation(station);
+                    
+                    // 触发点击监听器
+                    if (clickListener != null) {
+                        clickListener.accept(station);
+                    }
+                    return true;
+                }
+            }
+        }
+        
+        return super.mouseClicked(mouseX, mouseY, button);
+    }
+    
+    // 翻页方法
+    public void nextPage() {
+        if (currentPage < totalPages - 1) {
+            currentPage++;
+            refreshStations(provider != null ? provider.getSearchText() : "");
+        }
+    }
+    
+    public void prevPage() {
+        if (currentPage > 0) {
+            currentPage--;
+            refreshStations(provider != null ? provider.getSearchText() : "");
+        }
+    }
+    
+    public boolean hasNextPage() {
+        return currentPage < totalPages - 1;
+    }
+    
+    public boolean hasPrevPage() {
+        return currentPage > 0;
+    }
+    
+    @Override
+    public void updateNarration(NarrationElementOutput output) {
+        output.add(NarratedElementType.TITLE, LanguageHelper.translate("narrator.ticketsystem.station_list"));
+        
+        for (int i = 0; i < this.getItemCount(); i++) {
+            StationEntry entry = this.getEntry(i);
+            entry.updateNarration(output);
+        }
+    }
+    
+    public int getCurrentPage() {
+        return currentPage;
+    }
+    
+    public int getTotalPages() {
+        return totalPages;
+    }
+    
+    public int getItemHeight() {
+        return this.itemHeight;
+    }
+    
+    protected void renderScrollingText(GuiGraphics guiGraphics, String text, 
+                                      int left, int top, int width, int height, 
+                                      int color, String stationKey) {
+        int maxWidth = width - 10;
+        int textWidth = Minecraft.getInstance().font.width(text);
+        
+        if (textWidth <= maxWidth) {
+            guiGraphics.drawString(
+                Minecraft.getInstance().font, 
+                text, 
+                left + 5, 
+                top + (height - 8) / 2, 
+                color, 
+                false
+            );
+            return;
+        }
+        
+        // 实现滚动文本
+        long currentTime = System.currentTimeMillis();
+        int scrollOffset = (int) ((currentTime / 30) % (textWidth + maxWidth));
+        
+        if (scrollOffset <= textWidth) {
+            // 正常滚动阶段
+            guiGraphics.drawString(
+                Minecraft.getInstance().font, 
+                text, 
+                left + 5 - scrollOffset, 
+                top + (height - 8) / 2, 
+                color, 
+                false
+            );
+        } else {
+            // 暂停阶段 - 显示完整文本
+            guiGraphics.drawString(
+                Minecraft.getInstance().font, 
+                text, 
+                left + 5, 
+                top + (height - 8) / 2, 
+                color, 
+                false
+            );
+        }
+    }
+
+    public abstract static class StationEntry extends AbstractSelectionList.Entry<StationEntry> {
+        protected final String station;
+        protected boolean isSelected;
+
+        public StationEntry(String station) {
+            this.station = station;
+        }
+        
+        public abstract void render(GuiGraphics guiGraphics, int index, int top, int left, 
+                                  int width, int height, int mouseX, int mouseY, 
+                                  boolean isHovered, float partialTicks);
+        
+        public void updateNarration(NarrationElementOutput output) {
+            output.add(NarratedElementType.TITLE, 
+                Component.translatable("narrator.ticketsystem.station_entry", station));
+        }
+        
+        public String getStation() {
+            return station;
+        }
+        
+        public void setSelected(boolean selected) {
+            this.isSelected = selected;
+        }
+    }
+    
+    public interface StationListProvider {
+        void setSelectedStation(String station);
+        String getSelectedStation();
+        String getSearchText();
+        String getStartStation();
+    }
+    
+    public int getHoveredIndex() {
+        return -1; // 简化实现
+    }
+    
+    public List<String> getStations() {
+        return new ArrayList<>(); // 简化实现
+    }
+}
+package com.easttown.ticketsystem.client;
+
+import com.easttown.ticketsystem.screen.TicketMachineScreen;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.narration.NarratedElementType;
+import net.minecraft.network.chat.Component;
+
+public class AdminStationList extends BaseStationList {
+    
+    public AdminStationList(StationListProvider provider, 
+                         int x, int y, int width, int height) {
+        super(provider, x, y, width, height);
+    }
+    
+    @Override
+    protected AdminStationEntry createEntry(String station) {
+        return new AdminStationEntry(station);
+    }
+    
+    @Override
+    protected boolean canSelectStation(String station) {
+        // 管理员可以选择任何车站
+        return true;
+    }
+    
+    @Override
+    public void updateNarration(NarrationElementOutput output) {
+        output.add(NarratedElementType.TITLE, LanguageHelper.translate("narrator.ticketsystem.admin_station_list"));
+    }
+    
+    public class AdminStationEntry extends StationEntry {
+        public AdminStationEntry(String station) {
+            super(station);
+        }
+
+        @Override
+        public void render(GuiGraphics guiGraphics, int index, int top, int left, 
+                          int width, int height, int mouseX, int mouseY, 
+                          boolean isHovered, float partialTicks) {
+            
+            String startStation = provider != null ? provider.getStartStation() : "";
+            boolean isStart = station.equals(startStation);
+            
+            // 绘制条目背景
+            if (isSelected) {
+                guiGraphics.fill(left, top, left + width, top + height, SELECTED_BG);
+            } else if (isHovered) {
+                guiGraphics.fill(left, top, left + width, top + height, HOVER_BG);
+            } else if (isStart) {
+                guiGraphics.fill(left, top, left + width, top + height, START_BG);
+            } else {
+                guiGraphics.fill(left, top, left + width, top + height, NORMAL_BG);
+            }
+            
+            // 绘制车站名称
+            int color = isStart ? START_TEXT : (isSelected ? SELECTED_TEXT : NORMAL_TEXT);
+            renderScrollingText(guiGraphics, station, left, top, width, height, color, getStation());
+        }
+        
+        @Override
+        public void updateNarration(NarrationElementOutput output) {
+            output.add(NarratedElementType.TITLE, Component.literal(station));
+        }
+    }
+}
+package com.easttown.ticketsystem.client;
+
+import com.easttown.ticketsystem.init.MenuInit;
+import com.easttown.ticketsystem.screen.*;
+import com.easttown.ticketsystem.screen.terminal.TerminalMainScreen;
+import net.minecraft.client.gui.screens.MenuScreens;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+
+@Mod.EventBusSubscriber(modid = "ticketsystem", value = Dist.CLIENT, bus = Mod.EventBusSubscriber.Bus.MOD)
+public final class ClientSetup {
+
+    private static volatile boolean screensRegistered = false;   // 二次注册防护
+
+    @SubscribeEvent
+    public static void onClientSetup(FMLClientSetupEvent event) {
+        event.enqueueWork(() -> {
+            if (!screensRegistered) {
+                MenuScreens.register(MenuInit.TICKET_MACHINE_MENU.get(), TicketMachineScreen::new);
+                MenuScreens.register(MenuInit.GATE_CONFIG_MENU.get(), GateConfigScreen::new);
+                // 注册旅行服务终端菜单
+                MenuScreens.register(MenuInit.TERMINAL_MAIN_MENU.get(), com.easttown.ticketsystem.screen.terminal.TerminalMainScreen::new);
+                screensRegistered = true;
+            }
+
+            // 其他仅客户端逻辑
+            MinecraftForge.EVENT_BUS.register(new CoordinateDebugger());
+        });
+    }
+}
+// CoordinateDebugger.java
+package com.easttown.ticketsystem.client;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.screen.TicketMachineScreen;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.client.event.RenderGuiEvent;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+
+@OnlyIn(Dist.CLIENT)
+public class CoordinateDebugger {
+    @SubscribeEvent
+    public void onRenderGui(RenderGuiEvent.Pre event) {
+        // 使用全局调试模式
+        if (TicketSystemMod.debugMode) {
+            Minecraft mc = Minecraft.getInstance();
+            int mouseX = (int) mc.mouseHandler.xpos();
+            int mouseY = (int) mc.mouseHandler.ypos();
+            
+            String coords = String.format("Mouse: %d, %d", mouseX, mouseY);
+        
+            // 添加GUI位置信息
+            if (mc.screen instanceof TicketMachineScreen screen) {
+                try {
+                    // 获取GUI位置
+                    java.lang.reflect.Field leftPosField = TicketMachineScreen.class.getDeclaredField("leftPos");
+                    leftPosField.setAccessible(true);
+                    int leftPos = (int) leftPosField.get(screen);
+                    
+                    java.lang.reflect.Field topPosField = TicketMachineScreen.class.getDeclaredField("topPos");
+                    topPosField.setAccessible(true);
+                    int topPos = (int) topPosField.get(screen);
+                    
+                    coords += String.format(" | GUI: [%d,%d]", leftPos, topPos);
+                } catch (Exception e) {
+                    coords += " | GUI: [access failed]";
+                }
+            }
+            
+            event.getGuiGraphics().drawString(
+                mc.font,
+                coords,
+                10, 30, // 在屏幕左上角显示
+                0xFFFFFF,
+                false
+            );
+        }
+    }
+}
+// DebugRenderer.java (辅助渲染)
+package com.easttown.ticketsystem.client;
+
+import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
+import net.minecraft.world.phys.AABB;
+
+public class DebugRenderer {
+    public static void renderAABB(PoseStack poseStack, MultiBufferSource buffer, 
+                                 AABB aabb, int packedLight, 
+                                 float r, float g, float b, float a) {
+        VertexConsumer vertexConsumer = buffer.getBuffer(RenderType.LINES);
+        
+        double minX = aabb.minX;
+        double minY = aabb.minY;
+        double minZ = aabb.minZ;
+        double maxX = aabb.maxX;
+        double maxY = aabb.maxY;
+        double maxZ = aabb.maxZ;
+        
+        // 绘制底部
+        renderLine(vertexConsumer, poseStack, minX, minY, minZ, maxX, minY, minZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, minX, minY, minZ, minX, minY, maxZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, maxX, minY, minZ, maxX, minY, maxZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, minX, minY, maxZ, maxX, minY, maxZ, r, g, b, a);
+        
+        // 绘制顶部
+        renderLine(vertexConsumer, poseStack, minX, maxY, minZ, maxX, maxY, minZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, minX, maxY, minZ, minX, maxY, maxZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, maxX, maxY, minZ, maxX, maxY, maxZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, minX, maxY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+        
+        // 绘制侧边
+        renderLine(vertexConsumer, poseStack, minX, minY, minZ, minX, maxY, minZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, maxX, minY, minZ, maxX, maxY, minZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, minX, minY, maxZ, minX, maxY, maxZ, r, g, b, a);
+        renderLine(vertexConsumer, poseStack, maxX, minY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+    }
+    
+    private static void renderLine(VertexConsumer consumer, PoseStack poseStack, 
+                                  double x1, double y1, double z1,
+                                  double x2, double y2, double z2,
+                                  float r, float g, float b, float a) {
+        consumer.vertex(poseStack.last().pose(), (float) x1, (float) y1, (float) z1)
+                .color(r, g, b, a)
+                .normal(0, 1, 0)
+                .endVertex();
+        consumer.vertex(poseStack.last().pose(), (float) x2, (float) y2, (float) z2)
+                .color(r, g, b, a)
+                .normal(0, 1, 0)
+                .endVertex();
+    }
+}
+package com.easttown.ticketsystem.client;
+
+import com.easttown.ticketsystem.screen.TicketMachineScreen;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.narration.NarrationElementOutput;
+import net.minecraft.client.gui.narration.NarratedElementType;
+import net.minecraft.network.chat.Component;
+
+public class UserStationList extends BaseStationList {
+
+    public UserStationList(StationListProvider provider, 
+                         int x, int y, int width, int height) {
+        super(provider, x, y, width, height);
+    }
+    
+    @Override
+    protected UserStationEntry createEntry(String station) {
+        return new UserStationEntry(station);
+    }
+    
+    @Override
+    protected boolean canSelectStation(String station) {
+        // 用户不能选择起始站作为目的地
+        if (provider != null && provider.getStartStation() != null) {
+            return !station.equals(provider.getStartStation());
+        }
+        return true;
+    }
+    
+    @Override
+    public void updateNarration(NarrationElementOutput output) {
+        output.add(NarratedElementType.TITLE, LanguageHelper.translate("narrator.ticketsystem.user_station_list"));
+    }
+    
+    public class UserStationEntry extends StationEntry {
+        public UserStationEntry(String station) {
+            super(station);
+        }
+
+        @Override
+        public void render(GuiGraphics guiGraphics, int index, int top, int left, 
+                          int width, int height, int mouseX, int mouseY, 
+                          boolean isHovered, float partialTicks) {
+            
+            String startStation = provider != null ? provider.getStartStation() : "";
+            boolean isStart = station.equals(startStation);
+            boolean isDisabled = !canSelectStation(station);
+
+            // 绘制背景
+            if (isStart) {
+                guiGraphics.fill(left, top, left + width, top + height, START_BG);
+            } else if (isSelected) {
+                guiGraphics.fill(left, top, left + width, top + height, SELECTED_BG);
+            } else if (isHovered) {
+                guiGraphics.fill(left, top, left + width, top + height, HOVER_BG);
+            } else if (isDisabled) {
+                guiGraphics.fill(left, top, left + width, top + height, DISABLED_BG);
+            } else {
+                guiGraphics.fill(left, top, left + width, top + height, NORMAL_BG);
+            }
+
+            // 绘制文本
+            int textColor;
+            if (isStart) {
+                textColor = START_TEXT;
+            } else if (isSelected) {
+                textColor = SELECTED_TEXT;
+            } else if (isDisabled) {
+                textColor = DISABLED_TEXT;
+            } else {
+                textColor = NORMAL_TEXT;
+            }
+            
+            renderScrollingText(guiGraphics, station, left, top, width, height, textColor, getStation());
+        }
+        
+        @Override
+        public void updateNarration(NarrationElementOutput output) {
+            output.add(NarratedElementType.TITLE, Component.literal(station));
+        }
+    }
+}
+package com.easttown.ticketsystem.command;
+
+import com.easttown.ticketsystem.manager.StationManager;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.context.CommandContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
+
+public class AddStationCommand {
+    public static int execute(CommandContext<CommandSourceStack> context, String station, int x, int y, int z) {
+        // 添加车站坐标信息
+        StationManager.addStation(station, x, y, z);
+        context.getSource().sendSuccess(() -> 
+            Component.literal("已添加车站: " + station + " 坐标: (" + x + ", " + y + ", " + z + ")"), 
+            true
+        );
+        return Command.SINGLE_SUCCESS;
+    }
+}package com.easttown.ticketsystem.command;
+
+import com.easttown.ticketsystem.manager.StationManager;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.context.CommandContext;
+import com.mojang.brigadier.suggestion.Suggestions;
+import com.mojang.brigadier.suggestion.SuggestionsBuilder;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.SharedSuggestionProvider;
+import net.minecraft.network.chat.Component;
+
+import java.util.concurrent.CompletableFuture;
+
+public class DeleteStationCommand {
+    public static int execute(CommandContext<CommandSourceStack> context, String station) {
+        if (StationManager.containsStation(station)) {
+            StationManager.removeStation(station);
+            context.getSource().sendSuccess(() -> 
+                Component.literal("已删除车站: " + station), true);
+            return Command.SINGLE_SUCCESS;
+        } else {
+            context.getSource().sendFailure(
+                Component.literal("车站不存在: " + station));
+            return 0;
+        }
+    }
+    
+    public static CompletableFuture<Suggestions> getSuggestions(CommandContext<CommandSourceStack> context, SuggestionsBuilder builder) {
+        return SharedSuggestionProvider.suggest(StationManager.getStations(), builder);
+    }
+}package com.easttown.ticketsystem.command;
+
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.commands.Commands;
+
+public class TicketCommand {
+    public static void register(CommandDispatcher<CommandSourceStack> dispatcher) {
+        dispatcher.register(
+            Commands.literal("ticketsystem")
+                .requires(source -> source.hasPermission(4))
+                .then(
+                    Commands.literal("addstation")
+                        .then(
+                            Commands.argument("station", StringArgumentType.string())
+                            .then(
+                                Commands.argument("x", IntegerArgumentType.integer())
+                                .then(
+                                    Commands.argument("y", IntegerArgumentType.integer())
+                                    .then(
+                                        Commands.argument("z", IntegerArgumentType.integer())
+                                        .executes(
+                                            context -> AddStationCommand.execute(
+                                                context,
+                                                StringArgumentType.getString(context, "station"),
+                                                IntegerArgumentType.getInteger(context, "x"),
+                                                IntegerArgumentType.getInteger(context, "y"),
+                                                IntegerArgumentType.getInteger(context, "z")
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                )
+                // 修复点运算符位置和缺失的括号
+                .then(
+                    Commands.literal("deletestation")
+                        .then(
+                            Commands.argument("station", StringArgumentType.string())
+                                .suggests((context, builder) -> DeleteStationCommand.getSuggestions(context, builder))
+                                .executes(
+                                    context -> DeleteStationCommand.execute(
+                                        context,
+                                        StringArgumentType.getString(context, "station")
+                                    )
+                                )
+                        )
+                )
+                // 添加调试命令
+                .then(
+                    Commands.literal("toggledebug")
+                        .executes(ToggleDebugCommand::execute)
+                )
+        );
+    }
+}
+// ToggleDebugCommand.java
+package com.easttown.ticketsystem.command;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.mojang.brigadier.Command;
+import com.mojang.brigadier.context.CommandContext;
+import net.minecraft.commands.CommandSourceStack;
+import net.minecraft.network.chat.Component;
+
+public class ToggleDebugCommand {
+    public static int execute(CommandContext<CommandSourceStack> context) {
+        TicketSystemMod.debugMode = !TicketSystemMod.debugMode;
+        String status = TicketSystemMod.debugMode ? "开启" : "关闭";
+        context.getSource().sendSuccess(() -> 
+            Component.literal("调试模式已" + status), true);
+        return Command.SINGLE_SUCCESS;
+    }
+}package com.easttown.ticketsystem.config;
+
+import net.minecraftforge.common.ForgeConfigSpec;
+
+public class DebugConfig {
+    public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
+    public static final ForgeConfigSpec SPEC;
+
+    public static final ForgeConfigSpec.BooleanValue SHOW_DEBUG_LOGS;
+
+    static {
+        BUILDER.push("Debug Settings");
+
+        SHOW_DEBUG_LOGS = BUILDER
+            .comment("Whether to show debug logs in the console (default: true)")
+            .define("showDebugLogs", true);
+
+        BUILDER.pop();
+        SPEC = BUILDER.build();
+    }
+}package com.easttown.ticketsystem.config;
+
+import net.minecraftforge.common.ForgeConfigSpec;
+
+public class CoinConfig {
+    public static final ForgeConfigSpec.Builder BUILDER = new ForgeConfigSpec.Builder();
+    public static final ForgeConfigSpec SPEC;
+    
+    // 硬币类型配置
+    public static final ForgeConfigSpec.ConfigValue<String> COPPER_COIN_ITEM;
+    public static final ForgeConfigSpec.ConfigValue<String> IRON_COIN_ITEM;
+    public static final ForgeConfigSpec.ConfigValue<String> GOLD_COIN_ITEM;
+    public static final ForgeConfigSpec.ConfigValue<String> EMERALD_COIN_ITEM;
+    public static final ForgeConfigSpec.ConfigValue<String> DIAMOND_COIN_ITEM;
+    public static final ForgeConfigSpec.ConfigValue<String> NETHERITE_COIN_ITEM;
+    
+    // 硬币汇率
+    public static final ForgeConfigSpec.IntValue COPPER_TO_IRON_RATE;
+    public static final ForgeConfigSpec.IntValue IRON_TO_GOLD_RATE;
+    public static final ForgeConfigSpec.IntValue GOLD_TO_EMERALD_RATE;
+    public static final ForgeConfigSpec.IntValue EMERALD_TO_DIAMOND_RATE;
+    public static final ForgeConfigSpec.IntValue DIAMOND_TO_NETHERITE_RATE;
+    
+    // 每格距离的费用（铜币）
+    public static final ForgeConfigSpec.IntValue COST_PER_BLOCK;
+    
+    static {
+        BUILDER.push("硬币系统设置");
+        
+        // 硬币物品注册名
+        COPPER_COIN_ITEM = BUILDER.comment("铜币物品ID")
+            .define("copper_coin_item", "ticketsystem:copper_coin");
+        IRON_COIN_ITEM = BUILDER.comment("铁币物品ID")
+            .define("iron_coin_item", "ticketsystem:iron_coin");
+        GOLD_COIN_ITEM = BUILDER.comment("金币物品ID")
+            .define("gold_coin_item", "ticketsystem:gold_coin");
+        EMERALD_COIN_ITEM = BUILDER.comment("绿宝石币物品ID")
+            .define("emerald_coin_item", "ticketsystem:emerald_coin");
+        DIAMOND_COIN_ITEM = BUILDER.comment("钻石币物品ID")
+            .define("diamond_coin_item", "ticketsystem:diamond_coin");
+        NETHERITE_COIN_ITEM = BUILDER.comment("下界合金币物品ID")
+            .define("netherite_coin_item", "ticketsystem:netherite_coin");
+        
+        // 硬币兑换汇率
+        COPPER_TO_IRON_RATE = BUILDER.comment("铜币兑换铁币汇率 (1铁币 = X铜币)")
+            .defineInRange("copper_to_iron_rate", 10, 1, 1000);
+        IRON_TO_GOLD_RATE = BUILDER.comment("铁币兑换金币汇率 (1金币 = X铁币)")
+            .defineInRange("iron_to_gold_rate", 10, 1, 1000);
+        GOLD_TO_EMERALD_RATE = BUILDER.comment("金币兑换绿宝石币汇率 (1绿宝石币 = X金币)")
+            .defineInRange("gold_to_emerald_rate", 10, 1, 1000);
+        EMERALD_TO_DIAMOND_RATE = BUILDER.comment("绿宝石币兑换钻石币汇率 (1钻石币 = X绿宝石币)")
+            .defineInRange("emerald_to_diamond_rate", 10, 1, 1000);
+        DIAMOND_TO_NETHERITE_RATE = BUILDER.comment("钻石币兑换下界合金币汇率 (1下界合金币 = X钻石币)")
+            .defineInRange("diamond_to_netherite_rate", 10, 1, 1000);
+        
+        // 每格距离费用
+        COST_PER_BLOCK = BUILDER.comment("每格距离费用 (铜币)")
+            .defineInRange("cost_per_block", 1, 1, 100);
+        
+        BUILDER.pop();
+        SPEC = BUILDER.build();
+    }
+    
+    public static int getCopperToIronRate() {
+        return COPPER_TO_IRON_RATE.get();
+    }
+    
+    public static int getIronToGoldRate() {
+        return IRON_TO_GOLD_RATE.get();
+    }
+    
+    public static int getGoldToEmeraldRate() {
+        return GOLD_TO_EMERALD_RATE.get();
+    }
+    
+    public static int getEmeraldToDiamondRate() {
+        return EMERALD_TO_DIAMOND_RATE.get();
+    }
+    
+    public static int getDiamondToNetheriteRate() {
+        return DIAMOND_TO_NETHERITE_RATE.get();
+    }
+    
+    public static int getCostPerBlock() {
+        return COST_PER_BLOCK.get();
+    }
+}package com.easttown.ticketsystem.data;
+
+public class StationData {
+    private final int x;
+    private final int y;
+    private final int z;
+    private int price; // 价格（以铜币为单位）
+    
+    public StationData(int x, int y, int z) {
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.price = 100; // 默认价格
+    }
+    
+    public int getX() {
+        return x;
+    }
+    
+    public int getY() {
+        return y;
+    }
+    
+    public int getZ() {
+        return z;
+    }
+    
+    public int getPrice() {
+        return price;
+    }
+    
+    public void setPrice(int price) {
+        this.price = price;
+    }
+}package com.easttown.ticketsystem.init;
+
+import com.easttown.ticketsystem.block.GateBlockEntity;
+import com.easttown.ticketsystem.block.TicketMachineBlockEntity;
+import com.easttown.ticketsystem.block.ReissueMachineBlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+import com.easttown.ticketsystem.*;
+
+public class BlockEntityInit {
+    public static final DeferredRegister<
+            BlockEntityType<
+                    ?>> BLOCK_ENTITIES = DeferredRegister.create(ForgeRegistries.BLOCK_ENTITY_TYPES, TicketSystemMod.MODID);
+
+    public static final RegistryObject<
+            BlockEntityType<
+                    TicketMachineBlockEntity>> TICKET_MACHINE = BLOCK_ENTITIES.register("ticket_machine",
+            () -> BlockEntityType.Builder.of(
+                    TicketMachineBlockEntity::new,
+                    BlockInit.TICKET_MACHINE.get()
+            ).build(null));
+
+    // 添加闸机方块实体的注册
+    public static final RegistryObject<
+            BlockEntityType<GateBlockEntity>> GATE = BLOCK_ENTITIES.register("gate",
+            () -> BlockEntityType.Builder.of(
+                    GateBlockEntity::new,
+                    BlockInit.GATE.get()
+            ).build(null));
+    // 添加补票机器方块实体
+    public static final RegistryObject<
+            BlockEntityType<
+                    ReissueMachineBlockEntity>> REISSUE_MACHINE = BLOCK_ENTITIES.register("reissue_machine",
+            () -> BlockEntityType.Builder.of(
+                    ReissueMachineBlockEntity::new,
+                    BlockInit.REISSUE_MACHINE.get()
+            ).build(null));
+
+}
+package com.easttown.ticketsystem.init;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+//import com.easttown.ticketsystem.block.GateBlock;
+//import com.easttown.ticketsystem.block.TicketMachineBlock;
+import com.easttown.ticketsystem.block.GateBlock;
+import com.easttown.ticketsystem.block.TicketMachineBlock;
+import com.easttown.ticketsystem.block.ReissueMachineBlock;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.SoundType;
+import net.minecraft.world.level.block.state.BlockBehaviour;
+import net.minecraft.world.level.material.MapColor;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+
+public class BlockInit {
+    public static final DeferredRegister<Block> BLOCKS = 
+        DeferredRegister.create(ForgeRegistries.BLOCKS, TicketSystemMod.MODID);
+    
+    public static final RegistryObject<Block> TICKET_MACHINE = BLOCKS.register("ticket_machine", 
+        () -> new TicketMachineBlock(BlockBehaviour.Properties.of()
+            .strength(3.5f)
+            .sound(SoundType.METAL)
+            .requiresCorrectToolForDrops()
+            .noOcclusion()
+    ));
+    
+    // 添加闸机方块的注册
+    public static final RegistryObject<Block> GATE = BLOCKS.register("gate", 
+        () -> new GateBlock(BlockBehaviour.Properties.of()
+            .strength(3.5f)
+            .sound(SoundType.METAL)
+            .requiresCorrectToolForDrops()
+            .noOcclusion()
+    ));
+    
+    // 添加补票机器方块
+public static final RegistryObject<Block> REISSUE_MACHINE = BLOCKS.register("reissue_machine",
+    () -> new ReissueMachineBlock(BlockBehaviour.Properties.of()
+        .mapColor(MapColor.METAL)
+        .strength(5.0f, 6.0f)
+        .sound(SoundType.METAL)
+        .requiresCorrectToolForDrops()
+        .noOcclusion()
+));
+
+    // 添加自定义蛋糕方块（功能与原版蛋糕完全相同）
+    public static final RegistryObject<Block> CUSTOM_CAKE = BLOCKS.register("custom_cake",
+        () -> new net.minecraft.world.level.block.CakeBlock(BlockBehaviour.Properties.of()
+            .strength(0.5F)
+            .sound(SoundType.WOOL)
+    ));
+
+}
+package com.easttown.ticketsystem.init;
+
+import com.easttown.ticketsystem.item.*;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.Item;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+import com.easttown.ticketsystem.*;
+
+public class ItemInit {
+    public static final DeferredRegister<Item> ITEMS = DeferredRegister.create(ForgeRegistries.ITEMS,
+            TicketSystemMod.MODID);
+
+    // 原有物品
+    public static final RegistryObject<Item> TICKET_MACHINE_ITEM = ITEMS.register("ticket_machine",
+            () -> new BlockItem(BlockInit.TICKET_MACHINE.get(), new Item.Properties()));
+    public static final RegistryObject<Item> TICKET = ITEMS.register("ticket",
+            () -> new TicketItem(new Item.Properties().stacksTo(1)));
+    public static final RegistryObject<Item> ADMIN_KEY = ITEMS.register("admin_key",
+            () -> new AdminKeyItem(new Item.Properties().stacksTo(1)));
+
+    // 硬币物品
+    public static final RegistryObject<Item> COPPER_COIN = ITEMS.register("copper_coin",
+            CopperCoinItem::new);
+    public static final RegistryObject<Item> IRON_COIN = ITEMS.register("iron_coin",
+            IronCoinItem::new);
+    public static final RegistryObject<Item> GOLD_COIN = ITEMS.register("gold_coin",
+            GoldCoinItem::new);
+    public static final RegistryObject<Item> DIAMOND_COIN = ITEMS.register("diamond_coin",
+            DiamondCoinItem::new);
+    public static final RegistryObject<Item> EMERALD_COIN = ITEMS.register("emerald_coin",
+            EmeraldCoinItem::new);
+    public static final RegistryObject<Item> NETHERITE_COIN = ITEMS.register("netherite_coin",
+            NetheriteCoinItem::new);
+    public static final RegistryObject<Item> ITEM9875IS0 = ITEMS.register("9875is0",
+            ITEM9875is0::new);
+            // 在ItemInit类中添加
+    public static final RegistryObject<Item> REIMBURSEMENT_VOUCHER = ITEMS.register("reimbursement_voucher",
+            () -> new ReimbursementVoucherItem(new Item.Properties()));
+
+    
+    // 闸机物品
+    public static final RegistryObject<Item> GATE_ITEM = ITEMS.register("gate",
+            () -> new BlockItem(BlockInit.GATE.get(), new Item.Properties()));
+            public static final RegistryObject<Item> REISSUE_MACHINE_ITEM = ITEMS.register("reissue_machine",
+        () -> new BlockItem(BlockInit.REISSUE_MACHINE.get(), new Item.Properties()));
+
+    // 添加自定义蛋糕物品
+    public static final RegistryObject<Item> CUSTOM_CAKE_ITEM = ITEMS.register("custom_cake",
+        () -> new BlockItem(BlockInit.CUSTOM_CAKE.get(), new Item.Properties()));
+}
+package com.easttown.ticketsystem.init;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.screen.GateConfigMenu;
+import com.easttown.ticketsystem.screen.TicketMachineMenu;
+import com.easttown.ticketsystem.screen.terminal.menu.TerminalMainMenu;
+import net.minecraft.core.BlockPos;
+import net.minecraft.world.inventory.MenuType;
+import net.minecraftforge.common.extensions.IForgeMenuType;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraftforge.registries.RegistryObject;
+
+public class MenuInit {
+    public static final DeferredRegister<MenuType<?>> MENUS = 
+        DeferredRegister.create(ForgeRegistries.MENU_TYPES, TicketSystemMod.MODID);
+    
+    public static final RegistryObject<MenuType<TicketMachineMenu>> TICKET_MACHINE_MENU = 
+        MENUS.register("ticket_machine_menu", 
+            () -> IForgeMenuType.create((windowId, inv, data) -> 
+                new TicketMachineMenu(windowId, inv, data)));
+    
+    // 添加闸机配置菜单注册
+    public static final RegistryObject<MenuType<GateConfigMenu>> GATE_CONFIG_MENU =
+        MENUS.register("gate_config_menu",
+            () -> IForgeMenuType.create((windowId, inv, data) ->
+                new GateConfigMenu(windowId, inv, data)));
+
+    // 旅行服务终端主菜单
+    public static final RegistryObject<MenuType<TerminalMainMenu>> TERMINAL_MAIN_MENU =
+        MENUS.register("terminal_main_menu",
+            () -> IForgeMenuType.create((windowId, inv, data) ->
+                new TerminalMainMenu(windowId, inv, data)));
+
+}
+// AdminKeyItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class AdminKeyItem extends Item {
+    public AdminKeyItem(Properties properties) {
+        super(properties);
+    }
+}// CopperCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class CopperCoinItem extends Item {
+    public CopperCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}
+
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class EmeraldCoinItem extends Item {
+    public EmeraldCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}// DiamondCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class DiamondCoinItem extends Item {
+    public DiamondCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}
+
+// NetheriteCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class ITEM9875is0 extends Item {
+    public ITEM9875is0() {
+        super(new Properties().stacksTo(64));
+    }
+}
+// GoldCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class GoldCoinItem extends Item {
+    public GoldCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}
+
+
+// IronCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class IronCoinItem extends Item {
+    public IronCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}
+
+// NetheriteCoinItem.java
+package com.easttown.ticketsystem.item;
+
+import net.minecraft.world.item.Item;
+
+public class NetheriteCoinItem extends Item {
+    public NetheriteCoinItem() {
+        super(new Properties().stacksTo(64));
+    }
+}package com.easttown.ticketsystem.item;
+
+import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.level.Level;
+import org.jetbrains.annotations.Nullable;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+
+public class ReimbursementVoucherItem extends Item {
+    public ReimbursementVoucherItem(Properties properties) {
+        super(properties);
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, @Nullable Level level, 
+                               List<Component> tooltip, TooltipFlag flag) {
+        super.appendHoverText(stack, level, tooltip, flag);
+        
+        CompoundTag tag = stack.getTag();
+        if (tag != null && tag.getBoolean("IsReimbursement")) {
+            String start = tag.getString("StartStation");
+            String dest = tag.getString("Destination");
+            long issueTime = tag.getLong("IssueTime");
+            int price = tag.getInt("Price");
+            
+            if (!start.isEmpty() && !dest.isEmpty()) {
+                // 格式化时间
+                String timeStr = new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date(issueTime));
+                
+                // 添加基本信息
+                tooltip.add(Component.translatable("item.voucher.tooltip.route", start, dest)
+                    .copy().withStyle(ChatFormatting.GRAY));
+                tooltip.add(Component.translatable("item.voucher.tooltip.price", price)
+                    .copy().withStyle(ChatFormatting.GOLD));
+                tooltip.add(Component.translatable("item.voucher.tooltip.time", timeStr)
+                    .copy().withStyle(ChatFormatting.DARK_GRAY));
+                
+                // 添加报销凭证标识
+                tooltip.add(Component.translatable("item.voucher.status")
+                    .copy().withStyle(ChatFormatting.DARK_PURPLE, ChatFormatting.BOLD));
+            }
+        }
+    }
+}
+package com.easttown.ticketsystem.item;
+
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.ChatFormatting;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
+import net.minecraft.world.InteractionResultHolder;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.TooltipFlag;
+import net.minecraft.world.level.Level;
+import org.jetbrains.annotations.Nullable;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.List;
+
+public class TicketItem extends Item {
+    // 车票状态常量
+    public static final String UNUSED = "UNUSED";
+    public static final String IN_USE = "IN_USE";
+    public static final String COMPLETED = "COMPLETED";
+
+    public TicketItem(Properties properties) {
+        super(properties);
+    }
+
+    @Override
+    public void appendHoverText(ItemStack stack, @Nullable Level level, 
+                               List<Component> tooltip, TooltipFlag flag) {
+        super.appendHoverText(stack, level, tooltip, flag);
+        
+        CompoundTag tag = stack.getTag();
+        if (tag != null) {
+            String start = tag.getString("StartStation");
+            String dest = tag.getString("Destination");
+            long issueTime = tag.getLong("IssueTime");
+            int price = tag.getInt("Price");
+            String status = tag.getString("Status");
+            
+            if (!start.isEmpty() && !dest.isEmpty()) {
+                // 格式化时间
+                String timeStr = new SimpleDateFormat("yyyy-MM-dd HH:mm").format(new Date(issueTime));
+                
+                // 添加基本信息 - 使用语言键
+                tooltip.add(LanguageHelper.translate("item.ticket.tooltip.route", start, dest)
+                    .copy().withStyle(ChatFormatting.GRAY));
+                tooltip.add(LanguageHelper.translate("item.ticket.tooltip.price", price)
+                    .copy().withStyle(ChatFormatting.GOLD));
+                tooltip.add(LanguageHelper.translate("item.ticket.tooltip.time", timeStr)
+                    .copy().withStyle(ChatFormatting.DARK_GRAY));
+                
+                // 添加状态信息 - 使用语言键
+                Component statusText;
+                switch (status) {
+                    case IN_USE:
+                        statusText = LanguageHelper.translate("item.ticket.status.in_use")
+                            .copy().withStyle(ChatFormatting.YELLOW);
+                        break;
+                    case COMPLETED:
+                        statusText = LanguageHelper.translate("item.ticket.status.completed")
+                            .copy().withStyle(ChatFormatting.GREEN);
+                        break;
+                    default: // UNUSED
+                        statusText = LanguageHelper.translate("item.ticket.status.unused")
+                            .copy().withStyle(ChatFormatting.BLUE);
+                }
+                tooltip.add(statusText);
+                
+                // 添加使用说明 - 使用语言键
+                tooltip.add(LanguageHelper.translate("item.ticket.usage")
+                    .copy().withStyle(ChatFormatting.ITALIC, ChatFormatting.DARK_PURPLE));
+            }
+        }
+    }
+
+    @Override
+    public InteractionResultHolder<ItemStack> use(Level level, Player player, InteractionHand hand) {
+        ItemStack stack = player.getItemInHand(hand);
+        CompoundTag tag = stack.getTag();
+        
+        if (tag != null) {
+            String status = tag.getString("Status");
+            String dest = tag.getString("Destination");
+            
+            if (!dest.isEmpty()) {
+                if (!level.isClientSide) {
+                    // 显示使用信息 - 使用语言键
+                    switch (status) {
+                        case UNUSED:
+                            player.displayClientMessage(
+                                LanguageHelper.translate("item.ticket.use.unused", dest), true);
+                            break;
+                        case IN_USE:
+                            player.displayClientMessage(
+                                LanguageHelper.translate("item.ticket.use.in_use", dest), true);
+                            break;
+                        case COMPLETED:
+                            player.displayClientMessage(
+                                LanguageHelper.translate("item.ticket.use.completed", dest), true);
+                            break;
+                    }
+                }
+                return InteractionResultHolder.sidedSuccess(stack, level.isClientSide());
+            }
+        }
+        
+        return InteractionResultHolder.pass(stack);
+    }
+    
+    // 辅助方法：检查车票状态
+    public static boolean isUnused(ItemStack ticket) {
+        CompoundTag tag = ticket.getTag();
+        return tag != null && tag.getString("Status").equals(UNUSED);
+    }
+    
+    public static boolean isInUse(ItemStack ticket) {
+        CompoundTag tag = ticket.getTag();
+        return tag != null && tag.getString("Status").equals(IN_USE);
+    }
+    
+    public static boolean isCompleted(ItemStack ticket) {
+        CompoundTag tag = ticket.getTag();
+        return tag != null && tag.getString("Status").equals(COMPLETED);
+    }
+}
+package com.easttown.ticketsystem.manager;
+
+import com.easttown.ticketsystem.config.CoinConfig;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.registries.ForgeRegistries;
+
+import java.util.*;
+
+public class CoinSystem {
+    // 硬币价值映射（按从低到高排序）
+    private static final Map<String, Integer> coinValues = new LinkedHashMap<>();
+    
+    static {
+        // 初始化硬币价值（以铜币为单位）
+        coinValues.put(CoinConfig.COPPER_COIN_ITEM.get(), 1);
+        coinValues.put(CoinConfig.IRON_COIN_ITEM.get(), CoinConfig.getCopperToIronRate());
+        coinValues.put(CoinConfig.GOLD_COIN_ITEM.get(), 
+            CoinConfig.getIronToGoldRate() * CoinConfig.getCopperToIronRate());
+        coinValues.put(CoinConfig.EMERALD_COIN_ITEM.get(), 
+            CoinConfig.getGoldToEmeraldRate() * CoinConfig.getIronToGoldRate() * CoinConfig.getCopperToIronRate());
+        coinValues.put(CoinConfig.DIAMOND_COIN_ITEM.get(), 
+            CoinConfig.getEmeraldToDiamondRate() * CoinConfig.getGoldToEmeraldRate() * 
+            CoinConfig.getIronToGoldRate() * CoinConfig.getCopperToIronRate());
+        coinValues.put(CoinConfig.NETHERITE_COIN_ITEM.get(), 
+            CoinConfig.getDiamondToNetheriteRate() * CoinConfig.getEmeraldToDiamondRate() * 
+            CoinConfig.getGoldToEmeraldRate() * CoinConfig.getIronToGoldRate() * 
+            CoinConfig.getCopperToIronRate());
+    }
+    
+    // 计算最优硬币组合
+    public static Map<String, Integer> calculateOptimalCoins(int amount) {
+        Map<String, Integer> result = new HashMap<>();
+        int remaining = amount;
+        
+        // 从高级到低级计算
+        List<String> coins = new ArrayList<>(coinValues.keySet());
+        Collections.reverse(coins);
+        
+        for (String coinId : coins) {
+            int value = coinValues.get(coinId);
+            if (remaining >= value) {
+                int count = remaining / value;
+                result.put(coinId, count);
+                remaining %= value;
+            }
+        }
+        
+        return result;
+    }
+    
+    // 检查玩家是否有足够硬币
+    public static boolean hasSufficientCoins(Player player, int price) {
+        return getPlayerCopperValue(player) >= price;
+    }
+    
+    // 获取玩家硬币总价值（铜币）
+    public static int getPlayerCopperValue(Player player) {
+        int total = 0;
+        for (Map.Entry<String, Integer> entry : coinValues.entrySet()) {
+            String coinId = entry.getKey();
+            Item coinItem = ForgeRegistries.ITEMS.getValue(ResourceLocation.parse(coinId));
+            if (coinItem != null) {
+                int count = countItems(player.getInventory(), coinItem);
+                total += count * entry.getValue();
+            }
+        }
+        return total;
+    }
+    
+    // 扣除硬币并返回实际扣除的硬币（考虑找零）
+    public static Map<String, Integer> deductWithChange(Player player, int price) {
+        int playerValue = getPlayerCopperValue(player);
+        if (playerValue < price) return Collections.emptyMap();
+        
+        // 先移除全部硬币
+        for (Map.Entry<String, Integer> entry : coinValues.entrySet()) {
+            String coinId = entry.getKey();
+            Item coinItem = ForgeRegistries.ITEMS.getValue(ResourceLocation.parse(coinId));
+            if (coinItem != null) {
+                removeItems(player.getInventory(), coinItem, countItems(player.getInventory(), coinItem));
+            }
+        }
+        
+        // 计算并给予找零
+        int change = playerValue - price;
+        Map<String, Integer> changeCoins = calculateOptimalCoins(change);
+        
+        for (Map.Entry<String, Integer> entry : changeCoins.entrySet()) {
+            String coinId = entry.getKey();
+            Item coinItem = ForgeRegistries.ITEMS.getValue(ResourceLocation.parse(coinId));
+            if (coinItem != null && entry.getValue() > 0) {
+                giveItems(player, coinItem, entry.getValue());
+            }
+        }
+        
+        // 返回实际扣除的硬币
+        return calculateOptimalCoins(price);
+    }
+    
+    // 格式化差额为可读字符串
+    public static String formatDeficit(int deficitCopper) {
+        if (deficitCopper <= 0) return "0";
+        
+        Map<String, Integer> coins = calculateOptimalCoins(deficitCopper);
+        StringBuilder sb = new StringBuilder();
+        
+        List<String> coinTypes = Arrays.asList(
+            CoinConfig.NETHERITE_COIN_ITEM.get(),
+            CoinConfig.DIAMOND_COIN_ITEM.get(),
+            CoinConfig.EMERALD_COIN_ITEM.get(),
+            CoinConfig.GOLD_COIN_ITEM.get(),
+            CoinConfig.IRON_COIN_ITEM.get(),
+            CoinConfig.COPPER_COIN_ITEM.get()
+        );
+        
+        for (String coinType : coinTypes) {
+            if (coins.containsKey(coinType) && coins.get(coinType) > 0) {
+                if (sb.length() > 0) sb.append(" + ");
+                sb.append(coins.get(coinType)).append(" ").append(getCoinName(coinType));
+            }
+        }
+        
+        return sb.toString();
+    }
+    
+    // 获取硬币名称
+    public static String getCoinName(String coinId) {
+        if (coinId.equals(CoinConfig.COPPER_COIN_ITEM.get())) return "铜币";
+        if (coinId.equals(CoinConfig.IRON_COIN_ITEM.get())) return "铁币";
+        if (coinId.equals(CoinConfig.GOLD_COIN_ITEM.get())) return "金币";
+        if (coinId.equals(CoinConfig.EMERALD_COIN_ITEM.get())) return "绿宝石币";
+        if (coinId.equals(CoinConfig.DIAMOND_COIN_ITEM.get())) return "钻石币";
+        if (coinId.equals(CoinConfig.NETHERITE_COIN_ITEM.get())) return "下界合金币";
+        return "硬币";
+    }
+    
+    // 获取硬币价值（以铜币为单位）
+    public static int getCoinValue(String coinId) {
+        return coinValues.getOrDefault(coinId, 0);
+    }
+
+    // 检查是否为硬币
+    public static boolean isCoin(String coinId) {
+        return coinValues.containsKey(coinId);
+    }
+    
+    // 统计物品数量
+    private static int countItems(Inventory inventory, Item item) {
+        int count = 0;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.getItem() == item) {
+                count += stack.getCount();
+            }
+        }
+        return count;
+    }
+    
+    // 移除物品
+    private static void removeItems(Inventory inventory, Item item, int amount) {
+        int remaining = amount;
+        for (int i = 0; i < inventory.getContainerSize(); i++) {
+            ItemStack stack = inventory.getItem(i);
+            if (stack.getItem() == item) {
+                int toRemove = Math.min(remaining, stack.getCount());
+                stack.shrink(toRemove);
+                remaining -= toRemove;
+                if (remaining <= 0) break;
+            }
+        }
+    }
+    
+    // 给予物品
+    public static void giveItems(Player player, Item item, int amount) {
+        while (amount > 0) {
+            int stackSize = Math.min(item.getMaxStackSize(), amount);
+            ItemStack stack = new ItemStack(item, stackSize);
+            if (!player.addItem(stack)) {
+                player.drop(stack, false);
+            }
+            amount -= stackSize;
+        }
+    }
+}
+package com.easttown.ticketsystem.manager;
+
+import com.easttown.ticketsystem.config.CoinConfig;
+import net.minecraft.world.entity.player.Player;
+
+public class PriceCalculator {
+    public static int calculatePrice(String startStation, String destination) {
+        if (startStation.equals(destination)) return 0;
+        
+        double distance = StationManager.calculateDistance(startStation, destination);
+        
+        // 确保距离是有效的
+        if (distance <= 0) return 0;
+        
+        // 计算价格，确保不会溢出
+        long price = (long) (distance * CoinConfig.getCostPerBlock());
+        
+        // 限制价格在合理范围内
+        return (int) Math.min(price, Integer.MAX_VALUE);
+    }
+    
+    public static boolean deductPayment(Player player, int price) {
+        if (price <= 0) return true;
+        return CoinSystem.deductWithChange(player, price)!=null;
+    }
+}package com.easttown.ticketsystem.manager;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.data.StationData;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import com.google.gson.reflect.TypeToken;
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.lang.reflect.Type;
+import java.util.*;
+
+public class StationManager {
+    private static final String FILE_PATH = "mods/" + TicketSystemMod.MODID + "/stations.json";
+    private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static Map<String, StationData> stations = new HashMap<>();
+    
+    // 最大距离限制，防止坐标过大导致计算问题
+    private static final double MAX_DISTANCE = 1000000; // 1,000,000格
+
+    static {
+        try {
+            loadStations();
+        } catch (Exception e) {
+            TicketSystemMod.LOGGER.error("Failed to initialize StationManager", e);
+            stations = new HashMap<>();
+        }
+    }
+
+    private static void loadStations() {
+        File file = new File(FILE_PATH);
+        if (file.exists()) {
+            try (FileReader reader = new FileReader(file)) {
+                Type type = new TypeToken<Map<String, StationData>>() {}.getType();
+                Map<String, StationData> loaded = GSON.fromJson(reader, type);
+                if (loaded != null) {
+                    stations = loaded;
+                } else {
+                    stations = new HashMap<>();
+                }
+            } catch (Exception e) {
+                TicketSystemMod.LOGGER.error("Failed to load stations", e);
+                stations = new HashMap<>();
+            }
+        } else {
+            File dir = file.getParentFile();
+            if (!dir.exists()) {
+                dir.mkdirs();
+            }
+            saveStations();
+        }
+    }
+
+    private static void saveStations() {
+        try (FileWriter writer = new FileWriter(FILE_PATH)) {
+            GSON.toJson(stations, writer);
+        } catch (IOException e) {
+            TicketSystemMod.LOGGER.error("Failed to save stations", e);
+        }
+    }
+
+    public static void addStation(String station, int x, int y, int z) {
+        stations.put(station, new StationData(x, y, z));
+        saveStations();
+    }
+
+    public static void removeStation(String station) {
+        stations.remove(station);
+        saveStations();
+    }
+
+    public static Set<String> getStations() {
+        return stations.keySet();
+    }
+
+    public static StationData getStationData(String station) {
+        return stations.get(station);
+    }
+
+    public static boolean containsStation(String station) {
+        return stations.containsKey(station);
+    }
+    
+    public static double calculateDistance(String station1, String station2) {
+        if (station1.equals(station2)) return 0;
+        
+        StationData data1 = getStationData(station1);
+        StationData data2 = getStationData(station2);
+        if (data1 == null || data2 == null) return 0;
+        
+        // 使用long类型防止整数溢出
+        long dx = (long) data1.getX() - data2.getX();
+        long dy = (long) data1.getY() - data2.getY();
+        long dz = (long) data1.getZ() - data2.getZ();
+        
+        // 计算欧几里得距离
+        double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        
+        // 限制最大距离
+        return Math.min(distance, MAX_DISTANCE);
+    }
+    
+    // 添加方法检查坐标是否有效
+    public static boolean isValidCoordinate(int x, int y, int z) {
+        // 检查坐标是否在合理范围内（Minecraft世界坐标范围）
+        return x >= -30000000 && x <= 30000000 && 
+               y >= -2048 && y <= 2048 && 
+               z >= -30000000 && z <= 30000000;
+    }
+}package com.easttown.ticketsystem.network;
+
+import com.easttown.ticketsystem.block.GateBlockEntity;
+import com.easttown.ticketsystem.screen.GateConfigMenu;
+import com.easttown.ticketsystem.screen.GateConfigScreen;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
+import net.minecraftforge.fml.DistExecutor;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
+
+public class OpenGateConfigPacket {
+    private final BlockPos pos;
+
+    public OpenGateConfigPacket(BlockPos pos) {
+        this.pos = pos;
+    }
+
+    public static void encode(OpenGateConfigPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeBlockPos(packet.pos);
+    }
+
+    public static OpenGateConfigPacket decode(FriendlyByteBuf buffer) {
+        return new OpenGateConfigPacket(buffer.readBlockPos());
+    }
+
+    public static void handle(OpenGateConfigPacket packet, Supplier<NetworkEvent.Context> context) {
+        // 标记为已处理
+        context.get().setPacketHandled(true);
+        
+        // 只在客户端执行
+        if (context.get().getDirection().getReceptionSide().isClient()) {
+            context.get().enqueueWork(() -> {
+                // 使用DistExecutor确保在客户端执行
+                DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> handleClient(packet));
+            });
+        }
+    }
+
+    @OnlyIn(Dist.CLIENT)
+    private static void handleClient(OpenGateConfigPacket packet) {
+        Minecraft minecraft = Minecraft.getInstance();
+        Player player = minecraft.player;
+        if (player != null && minecraft.level != null) {
+            // 获取方块实体
+            if (minecraft.level.getBlockEntity(packet.pos) instanceof GateBlockEntity blockEntity) {
+                // 创建菜单对象
+                GateConfigMenu menu = new GateConfigMenu(
+                        0,
+                        player.getInventory(),
+                        blockEntity
+                );
+                
+                // 创建屏幕对象
+                GateConfigScreen screen = new GateConfigScreen(
+                        menu,
+                        player.getInventory(),
+                        Component.translatable("ticketsystem.gui.gate_config")
+                );
+                
+                // 打开屏幕
+                minecraft.setScreen(screen);
+            }
+        }
+    }
+}
+package com.easttown.ticketsystem.network;
+
+import net.minecraft.resources.ResourceLocation;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.fml.loading.FMLLoader;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraftforge.network.NetworkDirection;
+import net.minecraftforge.network.NetworkRegistry;
+import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.network.simple.SimpleChannel;
+
+public class NetworkHandler {
+    private static final String PROTOCOL_VERSION = "1";
+    public static SimpleChannel INSTANCE;
+    
+    public static void register() {
+        ResourceLocation location = ResourceLocation.fromNamespaceAndPath("ticketsystem", "main");
+        
+        INSTANCE = NetworkRegistry.newSimpleChannel(
+            location,
+            () -> PROTOCOL_VERSION,
+            PROTOCOL_VERSION::equals,
+            PROTOCOL_VERSION::equals
+        );
+        
+        int id = 0;
+        INSTANCE.registerMessage(id++, PrintTicketPacket.class, 
+            PrintTicketPacket::encode, PrintTicketPacket::decode, PrintTicketPacket::handle);
+        INSTANCE.registerMessage(id++, SetStartStationPacket.class, 
+            SetStartStationPacket::encode, SetStartStationPacket::decode, SetStartStationPacket::handle);
+        // 修复：只在客户端注册OpenGateConfigPacket
+        if (FMLLoader.getDist() == Dist.CLIENT) {
+            INSTANCE.registerMessage(id++, OpenGateConfigPacket.class, 
+                OpenGateConfigPacket::encode, OpenGateConfigPacket::decode, OpenGateConfigPacket::handle);
+        }
+        INSTANCE.registerMessage(id++, UpdateGateConfigPacket.class, 
+            UpdateGateConfigPacket::encode, UpdateGateConfigPacket::decode, UpdateGateConfigPacket::handle);
+        INSTANCE.registerMessage(id++, WithdrawCoinsPacket.class,
+            WithdrawCoinsPacket::encode, WithdrawCoinsPacket::decode, WithdrawCoinsPacket::handle);
+    }
+    
+    public static void sendToPlayer(Object packet, ServerPlayer player) {
+        if (INSTANCE != null) {
+            INSTANCE.send(PacketDistributor.PLAYER.with(() -> player), packet);
+        }
+    }
+    
+    public static void sendToServer(Object packet) {
+        if (INSTANCE != null) {
+            INSTANCE.sendToServer(packet);
+        }
+    }
+}
+package com.easttown.ticketsystem.network;
+
+import com.easttown.ticketsystem.block.TicketMachineBlockEntity;
+import com.easttown.ticketsystem.manager.CoinSystem;
+import com.easttown.ticketsystem.manager.PriceCalculator;
+import com.easttown.ticketsystem.manager.StationManager;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.Map;
+import java.util.function.Supplier;
+
+public class PrintTicketPacket {
+    private final BlockPos pos;
+    private final String destination;
+    
+    public PrintTicketPacket(BlockPos pos, String destination) {
+        this.pos = pos;
+        this.destination = destination;
+    }
+    
+    public static void encode(PrintTicketPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeBlockPos(packet.pos);
+        buffer.writeUtf(packet.destination);
+    }
+    
+    public static PrintTicketPacket decode(FriendlyByteBuf buffer) {
+        return new PrintTicketPacket(buffer.readBlockPos(), buffer.readUtf());
+    }
+    
+    public static void handle(PrintTicketPacket packet, Supplier<NetworkEvent.Context> context) {
+        context.get().enqueueWork(() -> {
+            ServerPlayer player = context.get().getSender();
+            if (player != null) {
+                Level level = player.level();
+                if (level.getBlockEntity(packet.pos) instanceof TicketMachineBlockEntity blockEntity) {
+                    String startStation = blockEntity.getStartStation();
+                    
+                    if (startStation == null || startStation.isEmpty()) {
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.start_not_set")
+                                        .copy().withStyle(ChatFormatting.RED), 
+                                false
+                        );
+                        return;
+                    }
+                    
+                    if (startStation.equals(packet.destination)) {
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.same_station")
+                                        .copy().withStyle(ChatFormatting.RED), 
+                                false
+                        );
+                        return;
+                    }
+                    
+                    if (!StationManager.containsStation(packet.destination)) {
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.station_not_found", packet.destination)
+                                        .copy().withStyle(ChatFormatting.RED), 
+                                false
+                        );
+                        return;
+                    }
+                    
+                    int price = PriceCalculator.calculatePrice(startStation, packet.destination);
+                    
+                    // 检查输出槽是否空闲
+                    if (!blockEntity.canPrintTicket()) {
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.output_occupied")
+                                        .copy().withStyle(ChatFormatting.RED), 
+                                false
+                        );
+                        return;
+                    }
+                    
+                    if (CoinSystem.hasSufficientCoins(player, price)) {
+                        // 支付并获取实际扣除的硬币
+                        Map<String, Integer> paidCoins = CoinSystem.deductWithChange(player, price);
+                        
+                        // 将硬币存入售票机
+                        blockEntity.addCoins(paidCoins);
+                        
+                        blockEntity.printTicket(packet.destination);
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.ticket_printed", price), 
+                                false
+                        );
+                    } else {
+                        int deficit = price - CoinSystem.getPlayerCopperValue(player);
+                        String deficitText = CoinSystem.formatDeficit(deficit);
+                        
+                        player.displayClientMessage(
+                                LanguageHelper.translate("command.insufficient_coins", price, deficitText)
+                                        .copy().withStyle(ChatFormatting.RED), 
+                                false
+                        );
+                    }
+                }
+            }
+        });
+        context.get().setPacketHandled(true);
+    }
+}
+package com.easttown.ticketsystem.network;
+
+import com.easttown.ticketsystem.block.GateBlockEntity;
+import com.easttown.ticketsystem.block.GateType;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
+
+public class UpdateGateConfigPacket {
+    private final BlockPos pos;
+    private final String gateId;
+    private final String stationId;
+    private final String gateType;
+    private final boolean allowReentry;
+    private final int maxTravelMinutes;
+    private final boolean destroyTicket;
+    private final boolean enabled;
+
+    public UpdateGateConfigPacket(BlockPos pos, String gateId, String stationId, String gateType, boolean allowReentry, 
+                                  int maxTravelMinutes, boolean destroyTicket, boolean enabled) {
+        this.pos = pos;
+        this.gateId = gateId;
+        this.stationId = stationId;
+        this.gateType = gateType;
+        this.allowReentry = allowReentry;
+        this.maxTravelMinutes = maxTravelMinutes;
+        this.destroyTicket = destroyTicket;
+        this.enabled = enabled;
+    }
+
+    public static void encode(UpdateGateConfigPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeBlockPos(packet.pos);
+        buffer.writeUtf(packet.gateId);
+        buffer.writeUtf(packet.stationId);
+        buffer.writeUtf(packet.gateType);
+        buffer.writeBoolean(packet.allowReentry);
+        buffer.writeInt(packet.maxTravelMinutes);
+        buffer.writeBoolean(packet.destroyTicket);
+        buffer.writeBoolean(packet.enabled);
+    }
+
+    public static UpdateGateConfigPacket decode(FriendlyByteBuf buffer) {
+        return new UpdateGateConfigPacket(
+            buffer.readBlockPos(),
+            buffer.readUtf(),
+            buffer.readUtf(),
+            buffer.readUtf(),
+            buffer.readBoolean(),
+            buffer.readInt(),
+            buffer.readBoolean(),
+            buffer.readBoolean()
+        );
+    }
+
+    public static void handle(UpdateGateConfigPacket packet, Supplier<NetworkEvent.Context> context) {
+        context.get().enqueueWork(() -> {
+            ServerLevel level = (ServerLevel) context.get().getSender().level();
+            if (level.getBlockEntity(packet.pos) instanceof GateBlockEntity gate) {
+                gate.setGateId(packet.gateId);
+                gate.setStationId(packet.stationId);
+                gate.setGateType(GateType.valueOf(packet.gateType));
+                gate.setAllowReentry(packet.allowReentry);
+                gate.setMaxTravelMinutes(packet.maxTravelMinutes);
+                gate.setDestroyTicket(packet.destroyTicket);
+                gate.setEnabled(packet.enabled);
+                
+                gate.setChanged();
+                level.sendBlockUpdated(packet.pos, gate.getBlockState(), gate.getBlockState(), 3);
+            }
+        });
+        context.get().setPacketHandled(true);
+    }
+}
+package com.easttown.ticketsystem.network;
+
+import com.easttown.ticketsystem.block.TicketMachineBlockEntity;
+import com.easttown.ticketsystem.manager.CoinSystem;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.network.NetworkEvent;
+import net.minecraftforge.registries.ForgeRegistries;
+import com.easttown.ticketsystem.init.ItemInit; // 添加导入
+import net.minecraft.network.chat.Component; // 添加导入
+import net.minecraft.resources.ResourceLocation;
+
+import java.util.Map;
+import java.util.function.Supplier;
+
+public class WithdrawCoinsPacket {
+    private final BlockPos pos;
+    
+    public WithdrawCoinsPacket(BlockPos pos) {
+        this.pos = pos;
+    }
+    
+    public static void encode(WithdrawCoinsPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeBlockPos(packet.pos);
+    }
+    
+    public static WithdrawCoinsPacket decode(FriendlyByteBuf buffer) {
+        return new WithdrawCoinsPacket(buffer.readBlockPos());
+    }
+    
+    public static void handle(WithdrawCoinsPacket packet, Supplier<NetworkEvent.Context> context) {
+        context.get().enqueueWork(() -> {
+            ServerPlayer player = context.get().getSender();
+            if (player != null) {
+                if (player.level().getBlockEntity(packet.pos) instanceof TicketMachineBlockEntity blockEntity) {
+                    // 检查是否是管理员
+                    if (!player.getMainHandItem().getItem().equals(ItemInit.ADMIN_KEY.get())) {
+                        player.displayClientMessage(Component.translatable("ticketsystem.command.not_admin"), true);
+                        return;
+                    }
+                    
+                    // 取出所有硬币
+                    Map<String, Integer> coins = blockEntity.withdrawCoins();
+                    int totalValue = blockEntity.getTotalCopperValue();
+                    
+                    if (coins.isEmpty()) {
+                        player.displayClientMessage(Component.translatable("ticketsystem.command.no_coins"), true);
+                        return;
+                    }
+                    
+                    // 给予玩家硬币
+                    for (Map.Entry<String, Integer> entry : coins.entrySet()) {
+                        Item coinItem = ForgeRegistries.ITEMS.getValue(ResourceLocation.tryParse(entry.getKey()));
+                        if (coinItem != null) {
+                            int amount = entry.getValue();
+                            while (amount > 0) {
+                                int stackSize = Math.min(coinItem.getMaxStackSize(), amount);
+                                ItemStack stack = new ItemStack(coinItem, stackSize);
+                                if (!player.addItem(stack)) {
+                                    player.drop(stack, false);
+                                }
+                                amount -= stackSize;
+                            }
+                        }
+                    }
+                    
+                    player.displayClientMessage(Component.translatable("ticketsystem.command.coins_withdrawn", totalValue), false);
+                }
+            }
+        });
+        context.get().setPacketHandled(true);
+    }
+}
+package com.easttown.ticketsystem.network;
+
+import com.easttown.ticketsystem.block.TicketMachineBlockEntity;
+import com.easttown.ticketsystem.util.LanguageHelper;
+
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.network.chat.Component;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.level.Level;
+import net.minecraftforge.network.NetworkEvent;
+
+import java.util.function.Supplier;
+
+public class SetStartStationPacket {
+    private final BlockPos pos;
+    private final String station;
+    
+    public SetStartStationPacket(BlockPos pos, String station) {
+        this.pos = pos;
+        this.station = station;
+    }
+    
+    public static void encode(SetStartStationPacket packet, FriendlyByteBuf buffer) {
+        buffer.writeBlockPos(packet.pos);
+        buffer.writeUtf(packet.station);
+    }
+    
+    public static SetStartStationPacket decode(FriendlyByteBuf buffer) {
+        return new SetStartStationPacket(buffer.readBlockPos(), buffer.readUtf());
+    }
+    
+    public static void handle(SetStartStationPacket packet, Supplier<NetworkEvent.Context> context) {
+        context.get().enqueueWork(() -> {
+            ServerPlayer player = context.get().getSender();
+            if (player != null) {
+                Level level = player.level();
+                if (level.getBlockEntity(packet.pos) instanceof TicketMachineBlockEntity blockEntity) {
+                    blockEntity.setStartStation(packet.station);
+                    player.displayClientMessage(
+                        LanguageHelper.translate("command.start_set", packet.station), false);
+                }
+            }
+        });
+        context.get().setPacketHandled(true);
+    }
+}package com.easttown.ticketsystem.screen.terminal.menu;
+
+import com.easttown.ticketsystem.block.ReissueMachineBlockEntity;
+import com.easttown.ticketsystem.init.MenuInit;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.entity.BlockEntity;
+
+public class TerminalMainMenu extends AbstractContainerMenu {
+
+    // 玩家物品栏位置
+    private static final int PLAYER_INVENTORY_X = 8;
+    private static final int PLAYER_INVENTORY_Y = 84;
+    private static final int HOTBAR_X = 8;
+    private static final int HOTBAR_Y = 142;
+
+    private final ReissueMachineBlockEntity blockEntity;
+    private final BlockPos pos;
+
+    public TerminalMainMenu(int containerId, Inventory playerInventory, FriendlyByteBuf data) {
+        this(containerId, playerInventory, playerInventory.player.level().getBlockEntity(data.readBlockPos()));
+    }
+
+    public TerminalMainMenu(int containerId, Inventory playerInventory, BlockEntity blockEntity) {
+        super(MenuInit.TERMINAL_MAIN_MENU.get(), containerId);
+        this.blockEntity = (ReissueMachineBlockEntity) blockEntity;
+        this.pos = blockEntity.getBlockPos();
+
+        // 只添加玩家物品栏
+        addPlayerInventory(playerInventory);
+        addPlayerHotbar(playerInventory);
+    }
+
+    private void addPlayerInventory(Inventory playerInventory) {
+        for (int i = 0; i < 3; ++i) {
+            for (int j = 0; j < 9; ++j) {
+                int slotIndex = j + i * 9 + 9;
+                this.addSlot(new Slot(playerInventory, slotIndex,
+                PLAYER_INVENTORY_X + j * 18, PLAYER_INVENTORY_Y + i * 18));
+            }
+        }
+    }
+
+    private void addPlayerHotbar(Inventory playerInventory) {
+        for (int i = 0; i < 9; ++i) {
+            this.addSlot(new Slot(playerInventory, i, HOTBAR_X + i * 18, HOTBAR_Y));
+        }
+    }
+
+    @Override
+    public ItemStack quickMoveStack(Player player, int index) {
+        return ItemStack.EMPTY;
+    }
+
+    @Override
+    public boolean stillValid(Player player) {
+        return this.blockEntity != null &&
+                !this.blockEntity.isRemoved() &&
+                player.distanceToSqr(
+                                this.pos.getX() + 0.5,
+                                this.pos.getY() + 0.5,
+                                this.pos.getZ() + 0.5) <= 64;
+    }
+
+    public ReissueMachineBlockEntity getBlockEntity() {
+        return blockEntity;
+    }
+
+    public BlockPos getPos() {
+        return pos;
+    }
+
+}package com.easttown.ticketsystem.screen.terminal;
+
+import com.easttown.ticketsystem.screen.terminal.menu.TerminalMainMenu;
+import com.mojang.blaze3d.systems.RenderSystem;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
+
+public class TerminalMainScreen extends AbstractContainerScreen<TerminalMainMenu> {
+
+    private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath("ticketsystem", "textures/gui/travel_service_terminal.png");
+
+    // GUI尺寸
+    public static final int IMAGE_WIDTH = 176;
+    public static final int IMAGE_HEIGHT = 166;
+
+    public TerminalMainScreen(TerminalMainMenu menu, Inventory inventory, Component title) {
+        super(menu, inventory, title);
+        this.imageWidth = IMAGE_WIDTH;
+        this.imageHeight = IMAGE_HEIGHT;
+        this.inventoryLabelY = this.imageHeight - 94;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+        // 极简版本，不添加任何按钮，只显示玩家物品栏
+    }
+
+    @Override
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTick) {
+        this.renderBackground(guiGraphics);
+
+        RenderSystem.setShader(GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.setShaderTexture(0, TEXTURE);
+
+        int x = this.leftPos;
+        int y = this.topPos;
+
+        // 绘制背景
+        guiGraphics.blit(TEXTURE, x, y, 0, 0, this.imageWidth, this.imageHeight);
+
+        // 渲染玩家物品栏和工具提示
+        super.render(guiGraphics, mouseX, mouseY, partialTick);
+        this.renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+
+    @Override
+    protected void renderBg(GuiGraphics guiGraphics, float partialTick, int mouseX, int mouseY) {
+        RenderSystem.setShader(GameRenderer::getPositionTexShader);
+        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        RenderSystem.setShaderTexture(0, TEXTURE);
+
+        int x = this.leftPos;
+        int y = this.topPos;
+
+        // 绘制背景
+        guiGraphics.blit(TEXTURE, x, y, 0, 0, this.imageWidth, this.imageHeight);
+    }
+
+}package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.manager.StationManager;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.BlockPos;
+import net.minecraft.network.chat.Component;
+
+public class AddStationScreen extends Screen {
+    private EditBox stationNameField;
+    private EditBox xField, yField, zField;
+    private final BlockPos playerPos;
+    
+    public AddStationScreen(BlockPos playerPos) {
+        super(LanguageHelper.translate("gui.add_station.title"));
+        this.playerPos = playerPos;
+    }
+    
+    @Override
+    protected void init() {
+        super.init();
+        int centerX = width / 2 - 100;
+        int centerY = height / 2 - 30;
+        
+        // 车站名称输入框
+        stationNameField = new EditBox(font, centerX, centerY - 40, 200, 20, 
+            LanguageHelper.translate("gui.station_name"));
+        stationNameField.setMaxLength(32);
+        addRenderableWidget(stationNameField);
+        setInitialFocus(stationNameField);
+        
+        // 坐标输入框
+        xField = new EditBox(font, centerX, centerY, 60, 20, Component.literal("X"));
+        xField.setValue(String.valueOf(playerPos.getX()));
+        addRenderableWidget(xField);
+        
+        yField = new EditBox(font, centerX + 80, centerY, 60, 20, Component.literal("Y"));
+        yField.setValue(String.valueOf(playerPos.getY()));
+        addRenderableWidget(yField);
+        
+        zField = new EditBox(font, centerX + 160, centerY, 60, 20, Component.literal("Z"));
+        zField.setValue(String.valueOf(playerPos.getZ()));
+        addRenderableWidget(zField);
+        
+        // 添加按钮
+        addRenderableWidget(Button.builder(LanguageHelper.translate("gui.add"), button -> {
+            addStation();
+        }).bounds(centerX, centerY + 40, 95, 20).build());
+        
+        // 取消按钮
+        addRenderableWidget(Button.builder(LanguageHelper.translate("gui.cancel"), button -> {
+            Minecraft.getInstance().setScreen(null);
+        }).bounds(centerX + 105, centerY + 40, 95, 20).build());
+    }
+    
+    // 添加车站逻辑
+    private void addStation() {
+        String stationName = stationNameField.getValue().trim();
+        String xText = xField.getValue().trim().replace("~", "");
+        String yText = yField.getValue().trim().replace("~", "");
+        String zText = zField.getValue().trim().replace("~", "");
+        
+        if (stationName.isEmpty() || xText.isEmpty() || yText.isEmpty() || zText.isEmpty()) {
+            // 显示缺失信息错误
+            Minecraft.getInstance().player.displayClientMessage(
+                LanguageHelper.translate("gui.missing_info"), false);
+            return;
+        }
+        
+        try {
+            int x = Integer.parseInt(xText);
+            int y = Integer.parseInt(yText);
+            int z = Integer.parseInt(zText);
+            
+            // 添加车站到管理器
+            StationManager.addStation(stationName, x, y, z);
+            Minecraft.getInstance().setScreen(null);
+            
+            // 显示成功消息
+            Minecraft.getInstance().player.displayClientMessage(
+                LanguageHelper.translate("command.station_added", stationName), false);
+        } catch (NumberFormatException e) {
+            // 显示无效坐标错误
+            Minecraft.getInstance().player.displayClientMessage(
+                LanguageHelper.translate("gui.invalid_coord"), false);
+        }
+    }
+    
+    @Override
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        // 渲染背景
+        renderBackground(guiGraphics);
+        // 居中绘制标题
+        guiGraphics.drawCenteredString(font, title, width / 2, height / 2 - 80, 0xFFFFFF);
+        
+        // 绘制标签
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.station_name"), 
+            width / 2 - 100, height / 2 - 55, 0xFFFFFF, false);
+        
+        guiGraphics.drawString(font, "X:", width / 2 - 115, height / 2 - 25, 0xFFFFFF);
+        guiGraphics.drawString(font, "Y:", width / 2 - 45, height / 2 - 25, 0xFFFFFF);
+        guiGraphics.drawString(font, "Z:", width / 2 + 25, height / 2 - 25, 0xFFFFFF);
+        
+        // 绘制波浪线提示
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.tilde_hint"), 
+            width / 2 - 100, height / 2 - 5, 0xAAAAAA, false);
+        
+        // 渲染所有组件
+        super.render(guiGraphics, mouseX, mouseY, partialTicks);
+    }
+}package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.block.GateBlockEntity;
+import com.easttown.ticketsystem.init.MenuInit;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import org.jetbrains.annotations.Nullable;
+
+public class GateConfigMenu extends AbstractContainerMenu {
+
+    private final GateBlockEntity blockEntity;
+
+    public GateConfigMenu(int containerId, Inventory inventory, GateBlockEntity blockEntity) {
+        super(MenuInit.GATE_CONFIG_MENU.get(), containerId);
+        this.blockEntity = blockEntity;
+    }
+
+    public GateConfigMenu(int containerId, Inventory inventory, FriendlyByteBuf extraData) {
+        this(containerId, inventory, (GateBlockEntity) inventory.player.level().getBlockEntity(extraData.readBlockPos()));
+    }
+
+    public GateBlockEntity getBlockEntity() {
+        return blockEntity;
+    }
+
+    @Override
+    public boolean stillValid(Player player) {
+        return blockEntity != null && !blockEntity.isRemoved();
+    }
+
+    @Nullable
+    @Override
+    public net.minecraft.world.item.ItemStack quickMoveStack(net.minecraft.world.entity.player.Player player, int index) {
+        return null;
+    }
+}
+package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.block.GateBlockEntity;
+import com.easttown.ticketsystem.block.GateType;
+import com.easttown.ticketsystem.network.NetworkHandler;
+import com.easttown.ticketsystem.network.UpdateGateConfigPacket;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.entity.player.Inventory;
+
+public class GateConfigScreen extends AbstractContainerScreen<GateConfigMenu> {
+    private static final int WIDTH = 256;
+    private static final int HEIGHT = 300;
+    
+    private final GateBlockEntity blockEntity;
+    
+    // 配置控件
+    private EditBox gateIdField;
+    private EditBox stationIdField;
+    private Button gateTypeButton;
+    private Button allowReentryButton;
+    private EditBox maxTravelMinutesField;
+    private Button destroyTicketButton;
+    private Button enabledButton;
+    
+    public GateConfigScreen(GateConfigMenu menu, Inventory inventory, Component title) {
+        super(menu, inventory, title);
+        this.blockEntity = menu.getBlockEntity();
+        this.imageWidth = WIDTH;
+        this.imageHeight = HEIGHT;
+    }
+    
+    @Override
+    protected void init() {
+        super.init();
+        this.leftPos = (this.width - imageWidth) / 2;
+        this.topPos = (this.height - imageHeight) / 2;
+        
+        int labelX = leftPos + 10;
+        int fieldX = leftPos + 120;
+        int y = topPos + 25;
+        int spacing = 25;
+        
+        // 闸机ID
+        gateIdField = new EditBox(this.font, fieldX, y, 120, 20, Component.literal(""));
+        gateIdField.setValue(blockEntity.getGateId());
+        addRenderableWidget(gateIdField);
+        y += spacing;
+        
+        // 站点ID
+        stationIdField = new EditBox(this.font, fieldX, y, 120, 20, Component.literal(""));
+        stationIdField.setValue(blockEntity.getStationId());
+        addRenderableWidget(stationIdField);
+        y += spacing;
+        
+        // 闸机类型按钮
+        gateTypeButton = new Button.Builder(
+                getGateTypeText(blockEntity.getGateType()), 
+                button -> cycleGateType())
+            .bounds(fieldX, y, 120, 20)
+            .build();
+        addRenderableWidget(gateTypeButton);
+        y += spacing;
+        
+        // 允许重新进站
+        allowReentryButton = new Button.Builder(
+                getBooleanText(blockEntity.isAllowReentry(), "ticketsystem.gui.allow_reentry"), 
+                button -> toggleBooleanSetting(button, "ticketsystem.gui.allow_reentry"))
+            .bounds(fieldX, y, 120, 20)
+            .build();
+        addRenderableWidget(allowReentryButton);
+        y += spacing;
+        
+        // 最大旅行时间
+        maxTravelMinutesField = new EditBox(this.font, fieldX, y, 120, 20, Component.literal(""));
+        maxTravelMinutesField.setValue(String.valueOf(blockEntity.getMaxTravelMinutes()));
+        addRenderableWidget(maxTravelMinutesField);
+        y += spacing;
+        
+        // 销毁车票
+        destroyTicketButton = new Button.Builder(
+                getBooleanText(blockEntity.isDestroyTicket(), "ticketsystem.gui.destroy_ticket"), 
+                button -> toggleBooleanSetting(button, "ticketsystem.gui.destroy_ticket"))
+            .bounds(fieldX, y, 120, 20)
+            .build();
+        addRenderableWidget(destroyTicketButton);
+        y += spacing + 15;
+        
+        // 启用/禁用闸机
+        enabledButton = new Button.Builder(
+                getBooleanText(blockEntity.isEnabled(), "ticketsystem.gui.enabled"), 
+                button -> toggleEnabled())
+            .bounds(fieldX, y, 120, 20)
+            .build();
+        addRenderableWidget(enabledButton);
+        
+        // 按钮区域
+        int buttonY = topPos + HEIGHT - 35;
+        // 保存按钮
+        addRenderableWidget(new Button.Builder(
+                Component.translatable("ticketsystem.gui.save_settings"), 
+                button -> saveSettings())
+            .bounds(leftPos + 50, buttonY, 70, 20)
+            .build());
+        
+        // 取消按钮
+        addRenderableWidget(new Button.Builder(
+                Component.translatable("ticketsystem.gui.cancel"), 
+                button -> onClose())
+            .bounds(leftPos + 130, buttonY, 70, 20)
+            .build());
+    }
+    
+    private Component getBooleanText(boolean value, String key) {
+        return Component.translatable(key + (value ? ".on" : ".off"));
+    }
+    
+    private Component getGateTypeText(GateType gateType) {
+        return Component.translatable("ticketsystem.gate_type." + gateType.name().toLowerCase());
+    }
+    
+    private void cycleGateType() {
+        GateType[] values = GateType.values();
+        GateType current = blockEntity.getGateType();
+        int nextIndex = (current.ordinal() + 1) % values.length;
+        GateType nextType = values[nextIndex];
+        blockEntity.setGateType(nextType);
+        gateTypeButton.setMessage(getGateTypeText(nextType));
+    }
+    
+    private void toggleBooleanSetting(Button button, String key) {
+        boolean currentValue;
+        switch (key) {
+            case "ticketsystem.gui.allow_reentry":
+                currentValue = blockEntity.isAllowReentry();
+                blockEntity.setAllowReentry(!currentValue);
+                button.setMessage(getBooleanText(!currentValue, key));
+                break;
+            case "ticketsystem.gui.destroy_ticket":
+                currentValue = blockEntity.isDestroyTicket();
+                blockEntity.setDestroyTicket(!currentValue);
+                button.setMessage(getBooleanText(!currentValue, key));
+                break;
+        }
+    }
+
+    private void toggleEnabled() {
+        boolean newValue = !blockEntity.isEnabled();
+        blockEntity.setEnabled(newValue);
+        enabledButton.setMessage(getBooleanText(newValue, "ticketsystem.gui.enabled"));
+    }
+    
+    private void saveSettings() {
+        // 获取控件中的值
+        String gateId = gateIdField.getValue();
+        String stationId = stationIdField.getValue();
+        String gateType = blockEntity.getGateType().name();
+        boolean allowReentry = blockEntity.isAllowReentry();
+        int maxTravelMinutes;
+        try {
+            maxTravelMinutes = Integer.parseInt(maxTravelMinutesField.getValue());
+        } catch (NumberFormatException e) {
+            maxTravelMinutes = blockEntity.getMaxTravelMinutes();
+        }
+        boolean destroyTicket = blockEntity.isDestroyTicket();
+        boolean enabled = blockEntity.isEnabled();
+
+        // 发送更新包到服务器
+        NetworkHandler.sendToServer(new UpdateGateConfigPacket(
+            blockEntity.getBlockPos(),
+            gateId,
+            stationId,
+            gateType,
+            allowReentry,
+            maxTravelMinutes,
+            destroyTicket,
+            enabled
+        ));
+
+        // 关闭界面
+        onClose();
+    }
+    
+    @Override
+    protected void renderBg(GuiGraphics guiGraphics, float partialTicks, int mouseX, int mouseY) {
+        // 绘制背景
+        guiGraphics.fill(leftPos, topPos, leftPos + imageWidth, topPos + imageHeight, 0xFFC6C6C6);
+        guiGraphics.renderOutline(leftPos, topPos, imageWidth, imageHeight, 0xFF000000);
+        
+        // 绘制标题
+        guiGraphics.drawCenteredString(font, title, leftPos + imageWidth / 2, topPos + 5, 0x000000);
+    }
+    
+    @Override
+    protected void renderLabels(GuiGraphics guiGraphics, int mouseX, int mouseY) {
+        int labelX = 10;
+        int y = 30;
+        int spacing = 25;
+        
+        // 绘制标签 - 与新的布局对齐
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.gate_id"), labelX, y, 0x000000, false);
+        y += spacing;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.station_id"), labelX, y, 0x000000, false);
+        y += spacing;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.gate_type"), labelX, y, 0x000000, false);
+        y += spacing;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.allow_reentry"), labelX, y, 0x000000, false);
+        y += spacing;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.max_travel_minutes"), labelX, y, 0x000000, false);
+        y += spacing;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.destroy_ticket"), labelX, y, 0x000000, false);
+        y += spacing + 15;
+        guiGraphics.drawString(font, LanguageHelper.translate("gui.enabled"), labelX, y, 0x000000, false);
+    }
+    
+    @Override
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        this.renderBackground(guiGraphics);
+        super.render(guiGraphics, mouseX, mouseY, partialTicks);
+        this.renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+    
+    @Override
+    public boolean isPauseScreen() {
+        return false;
+    }
+}
+package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.item.TicketItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.SlotItemHandler;
+
+/**
+ * 终端专用槽位类
+ * 为旅行服务终端提供自定义的物品槽位逻辑
+ */
+public class TerminalSlot extends SlotItemHandler {
+    private final boolean isInputSlot;
+    
+    public TerminalSlot(IItemHandler itemHandler, int index, int x, int y, boolean isInputSlot) {
+        super(itemHandler, index, x, y);
+        this.isInputSlot = isInputSlot;
+    }
+    
+    @Override
+    public boolean mayPlace(ItemStack stack) {
+        // 输入槽只允许放入车票，输出槽不允许放入物品
+        if (!isInputSlot) {
+            return false;
+        }
+        
+        // 检查是否为车票物品
+        return stack.getItem() instanceof TicketItem;
+    }
+    
+    @Override
+    public boolean mayPickup(net.minecraft.world.entity.player.Player player) {
+        // 输出槽可以随时拿起，输入槽只有在有物品时可以拿起
+        if (!isInputSlot) {
+            return true;
+        }
+        
+        ItemStack stack = getItem();
+        return !stack.isEmpty();
+    }
+}package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.block.TicketMachineBlockEntity;
+import com.easttown.ticketsystem.init.MenuInit;
+import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.world.entity.player.Inventory;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
+import net.minecraft.world.inventory.ContainerData;
+import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.IItemHandler;
+import net.minecraftforge.items.SlotItemHandler;
+
+public class TicketMachineMenu extends AbstractContainerMenu {
+    // 槽位位置常量 - 标准间距 (18像素)
+    private static final int PLAYER_INVENTORY_X = 8;
+    private static final int PLAYER_INVENTORY_Y = 175; // 调整为更合适的位置
+    private static final int HOTBAR_Y = PLAYER_INVENTORY_Y+16*3+6+4; // 标准箱子布局的快捷栏位置
+    
+    // 输出槽位置 (只用于用户模式)
+    private static final int USER_OUTPUT_SLOT_X = 233;
+    private static final int USER_OUTPUT_SLOT_Y = 60;
+    
+    public final TicketMachineBlockEntity blockEntity;
+    private final ContainerData data;
+    private final boolean adminMode;
+    
+    public TicketMachineMenu(int containerId, Inventory inventory, FriendlyByteBuf extraData) {
+        this(containerId, inventory, 
+            (TicketMachineBlockEntity) inventory.player.level().getBlockEntity(extraData.readBlockPos()),
+            extraData.readBoolean());
+    }
+    
+    public TicketMachineMenu(int containerId, Inventory inventory, TicketMachineBlockEntity blockEntity, boolean adminMode) {
+        super(MenuInit.TICKET_MACHINE_MENU.get(), containerId);
+        this.blockEntity = blockEntity;
+        this.adminMode = adminMode;
+        this.data = new ContainerData() {
+            @Override
+            public int get(int index) { return 0; }
+            @Override
+            public void set(int index, int value) {}
+            @Override
+            public int getCount() { return 0; }
+        };
+        
+        // 添加玩家物品栏槽位 - 使用标准18像素间距
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 9; col++) {
+                this.addSlot(new Slot(
+                    inventory, 
+                    col + row * 9 + 9, 
+                    PLAYER_INVENTORY_X + col * 18, 
+                    PLAYER_INVENTORY_Y + row * 18
+                ));
+            }
+        }
+        
+        // 添加快捷栏槽位 - 使用标准18像素间距
+        for (int col = 0; col < 9; col++) {
+            this.addSlot(new Slot(
+                inventory, 
+                col, 
+                PLAYER_INVENTORY_X + col * 18, 
+                HOTBAR_Y
+            ));
+        }
+        
+        // 只在用户模式下添加输出槽
+        if (!adminMode && blockEntity != null) {
+            IItemHandler handler = blockEntity.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
+            if (handler != null) {
+                this.addSlot(new OutputSlot(handler, 0, USER_OUTPUT_SLOT_X, USER_OUTPUT_SLOT_Y));
+            }
+        }
+        
+        addDataSlots(data);
+    }
+    
+    // 输出槽专用类
+    private static class OutputSlot extends SlotItemHandler {
+        public OutputSlot(IItemHandler itemHandler, int index, int x, int y) {
+            super(itemHandler, index, x, y);
+        }
+        
+        @Override
+        public boolean mayPlace(ItemStack stack) {
+            return false;
+        }
+    }
+    
+    @Override
+    public ItemStack quickMoveStack(Player player, int index) {
+        return ItemStack.EMPTY;
+    }
+    
+    @Override
+    public boolean stillValid(Player player) {
+        return blockEntity != null && 
+               !blockEntity.isRemoved() &&
+               player.distanceToSqr(
+                   blockEntity.getBlockPos().getX() + 0.5, 
+                   blockEntity.getBlockPos().getY() + 0.5, 
+                   blockEntity.getBlockPos().getZ() + 0.5) <= 64;
+    }
+    
+    public boolean isAdminMode() {
+        return adminMode;
+    }
+}
+package com.easttown.ticketsystem.screen;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.client.AdminStationList;
+import com.easttown.ticketsystem.client.BaseStationList;
+import com.easttown.ticketsystem.client.UserStationList;
+import net.minecraft.core.BlockPos;
+import com.easttown.ticketsystem.manager.CoinSystem;
+import com.easttown.ticketsystem.manager.PriceCalculator;
+import com.easttown.ticketsystem.network.NetworkHandler;
+import com.easttown.ticketsystem.network.PrintTicketPacket;
+import com.easttown.ticketsystem.network.SetStartStationPacket;
+import com.easttown.ticketsystem.network.WithdrawCoinsPacket;
+import com.easttown.ticketsystem.util.LanguageHelper;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.components.Button;
+import net.minecraft.client.gui.components.EditBox;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
+
+import java.util.Map;
+
+public class TicketMachineScreen extends AbstractContainerScreen<TicketMachineMenu>
+        implements BaseStationList.StationListProvider {
+    // GUI 尺寸常量
+    public static final int ADMIN_IMAGE_WIDTH = 300;
+    public static final int ADMIN_IMAGE_HEIGHT = 290;
+    public static final int USER_IMAGE_WIDTH = 290;
+    public static final int USER_IMAGE_HEIGHT = 270;
+
+    // 列表位置常量
+    public static final int ADMIN_LIST_X = 20;
+    public static final int ADMIN_LIST_Y = 50;
+    public static final int ADMIN_LIST_WIDTH = 120;
+    public static final int ADMIN_LIST_HEIGHT = 120;
+
+    public static final int USER_LIST_X = 20;
+    public static final int USER_LIST_Y = 50;
+    public static final int USER_LIST_WIDTH = 120;
+    public static final int USER_LIST_HEIGHT = 120;
+
+    // 搜索框位置
+    public static final int SEARCH_X = 75;
+    public static final int SEARCH_Y = 5;
+    public static final int SEARCH_WIDTH = 150;
+    public static final int SEARCH_HEIGHT = 20;
+
+    // 按钮位置
+    public static final int ADMIN_ADD_BUTTON_X = 180;
+    public static final int ADMIN_ADD_BUTTON_Y = 20;
+    public static final int ADMIN_SET_BUTTON_X = 180;
+    public static final int ADMIN_SET_BUTTON_Y = 50;
+    public static final int ADMIN_DELETE_BUTTON_X = 180;
+    public static final int ADMIN_DELETE_BUTTON_Y = 80;
+
+    public static final int USER_PRINT_BUTTON_X = 147;
+    public static final int USER_PRINT_BUTTON_Y = 80;
+
+    public static final int BUTTON_WIDTH = 100;
+    public static final int BUTTON_HEIGHT = 20;
+
+    // 信息显示位置
+    public static final int INFO_X = 20;
+    public static final int INFO_Y = 30;
+    public static final int INFO_WIDTH = 155;
+    public static final int INFO_HEIGHT = 10;
+
+    public static final int PRICE_X = 150;
+    public static final int PRICE_Y = 50;
+    public static final int PRICE_WIDTH = 110;
+    public static final int PRICE_HEIGHT = 20;
+
+    // 硬币信息显示位置
+    public static final int COINS_X = 150;
+    public static final int COINS_Y = 75;
+    public static final int COINS_WIDTH = 110;
+    public static final int COINS_HEIGHT = 40;
+
+    // 取款按钮位置
+    public static final int WITHDRAW_BUTTON_X = 147;
+    public static final int WITHDRAW_BUTTON_Y = 170;
+
+    // 标签位置
+    public static final int ADMIN_LABEL_X = 175;
+    public static final int ADMIN_LABEL_Y = 5;
+    public static final int ADMIN_LABEL_WIDTH = 110;
+    public static final int ADMIN_LABEL_HEIGHT = 10;
+
+    public static final int ADMIN_LIST_TITLE_X = 20;
+    public static final int ADMIN_LIST_TITLE_Y = 30;
+    public static final int ADMIN_LIST_TITLE_WIDTH = 120;
+    public static final int ADMIN_LIST_TITLE_HEIGHT = 10;
+
+    public static final int USER_LIST_TITLE_X = 17;
+    public static final int USER_LIST_TITLE_Y = 30;
+    public static final int USER_LIST_TITLE_WIDTH = 120;
+    public static final int USER_LIST_TITLE_HEIGHT = 10;
+
+    // 翻页按钮位置
+    public static final int ADMIN_PREV_PAGE_BUTTON_X = 20;
+    public static final int ADMIN_NEXT_PAGE_BUTTON_X = 140;
+    public static final int ADMIN_PAGE_BUTTON_Y = 175;
+
+    public static final int USER_PREV_PAGE_BUTTON_X = 20;
+    public static final int USER_NEXT_PAGE_BUTTON_X = 240;
+    public static final int USER_PAGE_BUTTON_Y = 5;
+
+    public static final int PAGE_BUTTON_WIDTH = 40;
+    public static final int PAGE_BUTTON_HEIGHT = 20;
+
+    // 纹理资源
+    private final ResourceLocation ADMIN_TEXTURE = ResourceLocation.fromNamespaceAndPath(TicketSystemMod.MODID,
+            "textures/gui/admin_ticket_machine.png");
+    private final ResourceLocation USER_TEXTURE = ResourceLocation.fromNamespaceAndPath(TicketSystemMod.MODID,
+            "textures/gui/user_ticket_machine.png");
+    // UI 组件
+    private EditBox searchBox;
+    private Button printButton, addButton, setStartButton, deleteButton;
+    private Button prevPageButton, nextPageButton;
+    private final AdminStationList adminStationList;
+    private final UserStationList userStationList;
+    private Button withdrawButton; // 取款按钮
+
+    // 状态变量
+    private String selectedStation = "";
+    private int estimatedPrice = 0;
+    private final BlockPos machinePos;
+    protected boolean debugMode = false;
+
+    // 当前界面尺寸
+    private int currentWidth;
+    private int currentHeight;
+
+    // 用于跟踪起始站变化
+    private String lastStartStation = "";
+
+    public TicketMachineScreen(TicketMachineMenu menu, Inventory inventory, Component title) {
+        super(menu, inventory, title);
+
+        this.machinePos = menu.blockEntity.getBlockPos();
+
+        // 初始化车站列表
+        this.adminStationList = new AdminStationList(
+                this,
+                leftPos + ADMIN_LIST_X,
+                topPos + ADMIN_LIST_Y,
+                ADMIN_LIST_WIDTH,
+                ADMIN_LIST_HEIGHT);
+
+        this.userStationList = new UserStationList(
+                this,
+                leftPos + USER_LIST_X,
+                topPos + USER_LIST_Y,
+                USER_LIST_WIDTH,
+                USER_LIST_HEIGHT);
+
+        // 根据模式设置不同尺寸
+        if (menu.isAdminMode()) {
+            this.imageWidth = ADMIN_IMAGE_WIDTH;
+            this.imageHeight = ADMIN_IMAGE_HEIGHT;
+        } else {
+            this.imageWidth = USER_IMAGE_WIDTH;
+            this.imageHeight = USER_IMAGE_HEIGHT;
+        }
+
+        currentWidth = imageWidth;
+        currentHeight = imageHeight;
+    }
+
+    @Override
+    protected void init() {
+        super.init();
+
+        // 计算GUI居中位置
+        leftPos = (width - currentWidth) / 2;
+        topPos = (height - currentHeight) / 2;
+
+        // 搜索框
+        searchBox = new EditBox(font,
+                leftPos + SEARCH_X, topPos + SEARCH_Y,
+                SEARCH_WIDTH, SEARCH_HEIGHT,
+                Component.translatable("ticketsystem.gui.search_station"));
+        searchBox.setResponder(text -> refreshStations());
+        addRenderableWidget(searchBox);
+
+        // 管理员按钮
+        addButton = Button.builder(Component.translatable("ticketsystem.gui.add_station"), button -> {
+            BlockPos playerPos = Minecraft.getInstance().player.blockPosition();
+            Minecraft.getInstance().setScreen(new AddStationScreen(playerPos));
+        })
+                .bounds(leftPos + ADMIN_ADD_BUTTON_X, topPos + ADMIN_ADD_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(addButton);
+
+        setStartButton = Button.builder(Component.translatable("ticketsystem.gui.set_start"), button -> {
+            if (!selectedStation.isEmpty()) {
+                NetworkHandler.sendToServer(new SetStartStationPacket(machinePos, selectedStation));
+                selectedStation = "";
+                refreshStations();
+            } else {
+                Minecraft.getInstance().player.displayClientMessage(
+                        Component.translatable("ticketsystem.command.station_not_selected"), true);
+            }
+        })
+                .bounds(leftPos + ADMIN_SET_BUTTON_X, topPos + ADMIN_SET_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(setStartButton);
+
+        deleteButton = Button.builder(Component.translatable("ticketsystem.gui.delete_station"), button -> {
+            if (!selectedStation.isEmpty()) {
+                Minecraft.getInstance().player.connection.sendCommand(
+                        "ticketsystem deletestation " + selectedStation);
+                selectedStation = "";
+                refreshStations();
+            } else {
+                Minecraft.getInstance().player.displayClientMessage(
+                        Component.translatable("ticketsystem.command.station_not_selected"), true);
+            }
+        })
+                .bounds(leftPos + ADMIN_DELETE_BUTTON_X, topPos + ADMIN_DELETE_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(deleteButton);
+
+        // 用户按钮 - 打印车票按钮
+        printButton = Button.builder(Component.translatable("ticketsystem.gui.buy_ticket"), button -> {
+            if (!selectedStation.isEmpty()) {
+                NetworkHandler.sendToServer(new PrintTicketPacket(machinePos, selectedStation));
+            } else {
+                Minecraft.getInstance().player.displayClientMessage(
+                        Component.translatable("ticketsystem.command.destination_not_selected"), true);
+            }
+        })
+                .bounds(leftPos + USER_PRINT_BUTTON_X, topPos + USER_PRINT_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(printButton);
+
+        // 翻页按钮
+        boolean isAdminMode = menu.isAdminMode();
+        prevPageButton = Button.builder(Component.literal("◀"), button -> {
+            if (isAdminMode) {
+                adminStationList.prevPage();
+            } else {
+                userStationList.prevPage();
+            }
+        })
+                .bounds(
+                        leftPos + (isAdminMode ? ADMIN_PREV_PAGE_BUTTON_X : USER_PREV_PAGE_BUTTON_X),
+                        topPos + (isAdminMode ? ADMIN_PAGE_BUTTON_Y : USER_PAGE_BUTTON_Y),
+                        PAGE_BUTTON_WIDTH, PAGE_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(prevPageButton);
+
+        nextPageButton = Button.builder(Component.literal("▶"), button -> {
+            if (isAdminMode) {
+                adminStationList.nextPage();
+            } else {
+                userStationList.nextPage();
+            }
+        })
+                .bounds(
+                        leftPos + (isAdminMode ? ADMIN_NEXT_PAGE_BUTTON_X : USER_NEXT_PAGE_BUTTON_X),
+                        topPos + (isAdminMode ? ADMIN_PAGE_BUTTON_Y : USER_PAGE_BUTTON_Y),
+                        PAGE_BUTTON_WIDTH, PAGE_BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(nextPageButton);
+
+        // 添加车站列表组件
+        addRenderableWidget(adminStationList);
+        addRenderableWidget(userStationList);
+
+        // 添加取款按钮
+        withdrawButton = Button.builder(Component.translatable("ticketsystem.gui.withdraw_coins"), button -> {
+            NetworkHandler.sendToServer(new WithdrawCoinsPacket(machinePos));
+        })
+                .bounds(leftPos + WITHDRAW_BUTTON_X, topPos + WITHDRAW_BUTTON_Y, BUTTON_WIDTH, BUTTON_HEIGHT)
+                .build();
+        addRenderableWidget(withdrawButton);
+
+        // 更新组件可见性
+        updateComponentVisibility();
+        // 刷新车站数据
+        refreshStations();
+
+        // 初始化起始站跟踪
+        lastStartStation = getStartStation();
+    }
+
+    // 刷新车站数据
+    private void refreshStations() {
+        String filter = searchBox.getValue();
+        adminStationList.refreshStations(filter);
+        userStationList.refreshStations(filter);
+        updatePriceEstimate();
+        updatePageButtons();
+    }
+
+    // 更新翻页按钮状态
+    private void updatePageButtons() {
+        if (menu.isAdminMode()) {
+            prevPageButton.active = adminStationList.hasPrevPage();
+            nextPageButton.active = adminStationList.hasNextPage();
+        } else {
+            prevPageButton.active = userStationList.hasPrevPage();
+            nextPageButton.active = userStationList.hasNextPage();
+        }
+    }
+
+    // 更新价格估算
+    private void updatePriceEstimate() {
+        String startStation = menu.blockEntity.getStartStation();
+        if (startStation == null || startStation.isEmpty() ||
+                selectedStation.isEmpty() || startStation.equals(selectedStation)) {
+            estimatedPrice = 0;
+        } else {
+            estimatedPrice = PriceCalculator.calculatePrice(startStation, selectedStation);
+        }
+    }
+
+    // 更新组件可见性
+    private void updateComponentVisibility() {
+        boolean adminMode = menu.isAdminMode();
+        addButton.visible = adminMode;
+        setStartButton.visible = adminMode;
+        deleteButton.visible = adminMode;
+        printButton.visible = !adminMode;
+        withdrawButton.visible = adminMode; // 只显示给管理员
+
+        adminStationList.setVisible(adminMode);
+        userStationList.setVisible(!adminMode);
+
+        prevPageButton.visible = true;
+        nextPageButton.visible = true;
+    }
+
+    @Override
+    protected void renderBg(GuiGraphics guiGraphics, float partialTicks, int mouseX, int mouseY) {
+        // 检查起始站是否变化
+        String currentStartStation = getStartStation();
+        if (!currentStartStation.equals(lastStartStation)) {
+            lastStartStation = currentStartStation;
+            updatePriceEstimate();
+            refreshStations();
+        }
+
+        // 根据模式选择不同纹理
+        ResourceLocation texture = menu.isAdminMode() ? ADMIN_TEXTURE : USER_TEXTURE;
+
+        // 渲染背景纹理
+        if (texture != null) {
+            try {
+                guiGraphics.blit(texture,
+                        leftPos, topPos,
+                        0, 0,
+                        currentWidth, currentHeight,
+                        currentWidth, currentHeight);
+            } catch (Exception e) {
+                guiGraphics.fill(leftPos, topPos, leftPos + currentWidth, topPos + currentHeight, 0xFFE0F7FA);
+            }
+        } else {
+            guiGraphics.fill(leftPos, topPos, leftPos + currentWidth, topPos + currentHeight, 0xFFE0F7FA);
+        }
+
+        // 获取并显示起始站信息
+        String startStation = menu.blockEntity.getStartStation();
+        String displayStart = (startStation == null || startStation.isEmpty())
+                ? Component.translatable("ticketsystem.gui.not_set").getString()
+                : startStation;
+
+        // 绘制起始站信息背景 - 使用更明显的背景
+        guiGraphics.fill(
+                leftPos + INFO_X, topPos + INFO_Y,
+                leftPos + INFO_X + INFO_WIDTH, topPos + INFO_Y + INFO_HEIGHT,
+                0xAA000000); // 改为半透明黑色背景
+
+        // 绘制起始站文本 - 使用白色文字
+        guiGraphics.drawString(
+                font,
+                LanguageHelper.translate("gui.start_station", displayStart).getString(),
+                leftPos + INFO_X + 5, topPos + INFO_Y + 2,
+                0xFFFFFFFF, // 白色
+                false);
+
+        // 管理员模式特定渲染
+        if (menu.isAdminMode()) {
+            // 绘制管理员标签背景
+            guiGraphics.fill(
+                    leftPos + ADMIN_LABEL_X, topPos + ADMIN_LABEL_Y,
+                    leftPos + ADMIN_LABEL_X + ADMIN_LABEL_WIDTH, topPos + ADMIN_LABEL_Y + ADMIN_LABEL_HEIGHT,
+                    0xAA000000);
+
+            // 绘制管理员模式文本
+            guiGraphics.drawString(
+                    font,
+                    LanguageHelper.translate("gui.admin_mode").getString(),
+                    leftPos + ADMIN_LABEL_X + 5, topPos + ADMIN_LABEL_Y + 2,
+                    0xFFFF0000, // 红色
+                    false);
+
+            // 绘制车站列表标题背景
+            guiGraphics.fill(
+                    leftPos + ADMIN_LIST_TITLE_X, topPos + ADMIN_LIST_TITLE_Y,
+                    leftPos + ADMIN_LIST_TITLE_X + ADMIN_LIST_TITLE_WIDTH,
+                    topPos + ADMIN_LIST_TITLE_Y + ADMIN_LIST_TITLE_HEIGHT,
+                    0xAA000000);
+
+            // 绘制车站列表标题
+            guiGraphics.drawString(
+                    font,
+                    LanguageHelper.translate("gui.all_stations").getString(),
+                    leftPos + ADMIN_LIST_TITLE_X, topPos + ADMIN_LIST_TITLE_Y + 18,
+                    0xFFFFFFFF,
+                    false);
+
+            // 绘制页码信息 - 管理员模式
+            String pageInfo = LanguageHelper.translate("gui.page_indicator",
+                    adminStationList.getCurrentPage() + 1,
+                    adminStationList.getTotalPages()).getString();
+            guiGraphics.drawString(
+                    font,
+                    pageInfo,
+                    leftPos + ADMIN_PREV_PAGE_BUTTON_X + 20,
+                    topPos + ADMIN_PAGE_BUTTON_Y + 6,
+                    0x000000,
+                    false);
+
+            // 显示硬币存储信息
+            int totalValue = menu.blockEntity.getTotalCopperValue();
+            Map<String, Integer> storedCoins = menu.blockEntity.getStoredCoins();
+
+            // 硬币存储背景框
+            guiGraphics.fill(
+                    leftPos + COINS_X, topPos + COINS_Y,
+                    leftPos + COINS_X + COINS_WIDTH, topPos + COINS_Y + COINS_HEIGHT,
+                    0xAAFFFF00);
+
+            // 显示总价值
+            guiGraphics.drawString(
+                    font,
+                    LanguageHelper.translate("gui.total_coins", totalValue).getString(),
+                    leftPos + COINS_X + 5, topPos + COINS_Y + 5,
+                    0x000000,
+                    false);
+
+            // 显示各种硬币数量
+            int yOffset = 20;
+            for (Map.Entry<String, Integer> entry : storedCoins.entrySet()) {
+                if (entry.getValue() > 0) {
+                    String coinName = CoinSystem.getCoinName(entry.getKey());
+                    guiGraphics.drawString(
+                            font,
+                            LanguageHelper.translate("gui.coin_amount", coinName, entry.getValue()).getString(),
+                            leftPos + COINS_X + 5, topPos + COINS_Y + yOffset,
+                            0x000000,
+                            false);
+                    yOffset += 10;
+                }
+            }
+        }
+        // 用户模式特定渲染
+        else {
+            // 绘制目的地列表标题背景
+            guiGraphics.fill(
+                    leftPos + USER_LIST_TITLE_X, topPos + USER_LIST_TITLE_Y,
+                    leftPos + USER_LIST_TITLE_X + USER_LIST_TITLE_WIDTH,
+                    topPos + USER_LIST_TITLE_Y + USER_LIST_TITLE_HEIGHT,
+                    0xAA000000);
+
+            // 绘制目的地列表标题
+            guiGraphics.drawString(
+                    font,
+                    LanguageHelper.translate("gui.select_destination").getString(),
+                    leftPos + USER_LIST_TITLE_X, topPos + USER_LIST_TITLE_Y + 20,
+                    0xFFFFFFFF,
+                    false);
+
+            // 绘制页码信息 - 用户模式
+            String pageInfo = LanguageHelper.translate("gui.page_indicator",
+                    userStationList.getCurrentPage() + 1,
+                    userStationList.getTotalPages()).getString();
+            guiGraphics.drawString(
+                    font,
+                    pageInfo,
+                    leftPos + USER_PRINT_BUTTON_X,
+                    topPos + USER_PRINT_BUTTON_Y + 30,
+                    0x000000,
+                    false);
+
+            // 只在用户模式下显示价格估算
+            if (estimatedPrice > 0) {
+                // 价格背景框
+                guiGraphics.fill(
+                        leftPos + PRICE_X, topPos + PRICE_Y,
+                        leftPos + PRICE_X + PRICE_WIDTH, topPos + PRICE_Y + PRICE_HEIGHT,
+                        0xAA00AA00);
+
+                // 价格文本
+                guiGraphics.drawString(
+                        font,
+                        LanguageHelper.translate("gui.estimated_price", estimatedPrice).getString(),
+                        leftPos + PRICE_X + 5, topPos + PRICE_Y + 6,
+                        0xFFFFFFFF,
+                        false);
+            } else if (!selectedStation.isEmpty()) {
+                // 警告背景框
+                guiGraphics.fill(
+                        leftPos + PRICE_X, topPos + PRICE_Y,
+                        leftPos + PRICE_X + PRICE_WIDTH, topPos + PRICE_Y + PRICE_HEIGHT,
+                        0xAAFF0000);
+
+                // 警告文本
+                guiGraphics.drawString(
+                        font,
+                        LanguageHelper.translate("gui.same_station_warning").getString(),
+                        leftPos + PRICE_X + 5, topPos + PRICE_Y + 6,
+                        0xFFFFFFFF,
+                        false);
+            }
+        }
+    }
+
+    // 设置选中的车站
+    public void setSelectedStation(String station) {
+        this.selectedStation = station;
+        updatePriceEstimate();
+    }
+
+    // 获取选中的车站
+    public String getSelectedStation() {
+        return selectedStation;
+    }
+
+    // 获取起始站
+    public String getStartStation() {
+        return menu.blockEntity.getStartStation();
+    }
+
+    // 获取搜索文本
+    public String getSearchText() {
+        return searchBox.getValue();
+    }
+
+    // 获取列表位置和尺寸
+    public int getAdminListX() {
+        return ADMIN_LIST_X;
+    }
+
+    public int getAdminListY() {
+        return ADMIN_LIST_Y;
+    }
+
+    public int getAdminListWidth() {
+        return ADMIN_LIST_WIDTH;
+    }
+
+    public int getAdminListHeight() {
+        return ADMIN_LIST_HEIGHT;
+    }
+
+    public int getUserListX() {
+        return USER_LIST_X;
+    }
+
+    public int getUserListY() {
+        return USER_LIST_Y;
+    }
+
+    public int getUserListWidth() {
+        return USER_LIST_WIDTH;
+    }
+
+    public int getUserListHeight() {
+        return USER_LIST_HEIGHT;
+    }
+
+    @Override
+    public void render(GuiGraphics guiGraphics, int mouseX, int mouseY, float partialTicks) {
+        // 更新列表位置和尺寸
+        adminStationList.setPosition(
+                leftPos + getAdminListX(),
+                topPos + getAdminListY(),
+                getAdminListWidth(),
+                getAdminListHeight());
+
+        userStationList.setPosition(
+                leftPos + getUserListX(),
+                topPos + getUserListY(),
+                getUserListWidth(),
+                getUserListHeight());
+
+        // 更新翻页按钮状态
+        updatePageButtons();
+
+        // 渲染背景
+        renderBackground(guiGraphics);
+        super.render(guiGraphics, mouseX, mouseY, partialTicks);
+
+        // 渲染工具提示
+        renderTooltip(guiGraphics, mouseX, mouseY);
+    }
+}
+package com.easttown.ticketsystem.util;
+
+import net.minecraft.nbt.CompoundTag;
+
+import java.util.UUID;
+
+public class GateUtil {
+    public static UUID getTicketId(CompoundTag ticketTag) {
+        if (ticketTag.contains("TicketId")) {
+            return UUID.fromString(ticketTag.getString("TicketId"));
+        }
+        return null;
+    }
+}
+package com.easttown.ticketsystem.util;
+
+import com.easttown.ticketsystem.TicketSystemMod;
+import com.easttown.ticketsystem.config.DebugConfig;
+
+public class DebugLogger {
+
+    public static void info(String message, Object... params) {
+        if (DebugConfig.SHOW_DEBUG_LOGS.get()) {
+            TicketSystemMod.LOGGER.info(message, params);
+        }
+    }
+
+    public static void debug(String message, Object... params) {
+        if (DebugConfig.SHOW_DEBUG_LOGS.get()) {
+            TicketSystemMod.LOGGER.debug(message, params);
+        }
+    }
+
+    public static void warn(String message, Object... params) {
+        if (DebugConfig.SHOW_DEBUG_LOGS.get()) {
+            TicketSystemMod.LOGGER.warn(message, params);
+        }
+    }
+
+    public static void error(String message, Object... params) {
+        // 错误日志总是显示，不受配置影响
+        TicketSystemMod.LOGGER.error(message, params);
+    }
+
+    public static void error(String message, Throwable throwable) {
+        // 错误日志总是显示，不受配置影响
+        TicketSystemMod.LOGGER.error(message, throwable);
+    }
+}package com.easttown.ticketsystem.util;
+
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.MutableComponent;
+
+public class LanguageHelper {
+    public static MutableComponent translate(String key) {
+        return Component.translatable("ticketsystem." + key);
+    }
+    
+    public static MutableComponent translate(String key, Object... args) {
+        return Component.translatable("ticketsystem." + key, args);
+    }
+}
+package com.easttown.ticketsystem;
+
+import com.easttown.ticketsystem.command.TicketCommand;
+import com.easttown.ticketsystem.config.CoinConfig;
+import com.easttown.ticketsystem.config.DebugConfig;
+import com.easttown.ticketsystem.init.*;
+import com.easttown.ticketsystem.network.NetworkHandler;
+import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.RegisterCommandsEvent;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.eventbus.api.SubscribeEvent;
+import net.minecraftforge.fml.ModLoadingContext;
+import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.fml.config.ModConfig;
+import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
+import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+
+import java.io.File;
+
+@Mod(TicketSystemMod.MODID)
+public class TicketSystemMod {
+    public static final String MODID = "ticketsystem";
+    public static final Logger LOGGER = LogManager.getLogger();
+    
+    // 添加全局调试模式开关
+    public static boolean debugMode = false;
+    
+    public TicketSystemMod() {
+        // 使用新的API获取上下文
+        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
+        ModLoadingContext modContext = ModLoadingContext.get();
+        
+        modContext.registerConfig(
+            ModConfig.Type.COMMON,
+            CoinConfig.SPEC,
+            "ticketsystem-common.toml"
+        );
+
+        modContext.registerConfig(
+            ModConfig.Type.CLIENT,
+            DebugConfig.SPEC,
+            "ticketsystem-client.toml"
+        );
+        
+        BlockInit.BLOCKS.register(modEventBus);
+        ItemInit.ITEMS.register(modEventBus);
+        BlockEntityInit.BLOCK_ENTITIES.register(modEventBus);
+        MenuInit.MENUS.register(modEventBus);
+        TicketSystemTab.register(modEventBus);
+        
+        modEventBus.addListener(this::onCommonSetup);
+        
+        MinecraftForge.EVENT_BUS.register(this);
+        
+        new File("mods/" + MODID).mkdirs();
+        LOGGER.info("TicketSystem Mod initialized");
+    }
+    
+    private void onCommonSetup(final FMLCommonSetupEvent event) {
+        event.enqueueWork(NetworkHandler::register);
+    }
+    
+    @SubscribeEvent
+    public void onCommandRegister(RegisterCommandsEvent event) {
+        TicketCommand.register(event.getDispatcher());
+        LOGGER.info("Registered commands");
+    }
+}
+// TicketSystemTab.java
+package com.easttown.ticketsystem;
+
+import com.easttown.ticketsystem.init.ItemInit;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.network.chat.Component;
+import net.minecraft.world.item.CreativeModeTab;
+import net.minecraft.world.item.ItemStack;
+import net.minecraftforge.eventbus.api.IEventBus;
+import net.minecraftforge.registries.DeferredRegister;
+import net.minecraftforge.registries.RegistryObject;
+
+public class TicketSystemTab {
+    private static final DeferredRegister<CreativeModeTab> TABS = DeferredRegister.create(Registries.CREATIVE_MODE_TAB,
+            TicketSystemMod.MODID);
+
+    public static final RegistryObject<CreativeModeTab> TICKET_TAB = TABS.register("ticket_tab",
+            () -> CreativeModeTab.builder()
+                    .title(Component.translatable("itemGroup.ticketsystem"))
+                    .icon(() -> new ItemStack(ItemInit.TICKET.get()))
+                    .displayItems((params, output) -> {
+                        output.accept(ItemInit.TICKET_MACHINE_ITEM.get());
+                        output.accept(ItemInit.TICKET.get());
+                        output.accept(ItemInit.ADMIN_KEY.get());
+                        output.accept(ItemInit.COPPER_COIN.get());
+                        output.accept(ItemInit.IRON_COIN.get());
+                        output.accept(ItemInit.DIAMOND_COIN.get());
+                        output.accept(ItemInit.GOLD_COIN.get());
+                        output.accept(ItemInit.NETHERITE_COIN.get());
+                        output.accept(ItemInit.EMERALD_COIN.get());
+                        output.accept(ItemInit.GATE_ITEM.get());
+                        output.accept(ItemInit.ITEM9875IS0.get());
+                        output.accept(ItemInit.REISSUE_MACHINE_ITEM.get());
+                        output.accept(ItemInit.REIMBURSEMENT_VOUCHER.get());
+                    })
+                    .build());
+
+    public static void register(IEventBus eventBus) {
+        TABS.register(eventBus);
+    }
+}这个是第二个版本

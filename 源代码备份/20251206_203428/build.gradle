@@ -1,0 +1,159 @@
+plugins {
+    id 'eclipse'
+    id 'idea'
+    id 'maven-publish'
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)'
+}
+
+// ========== 修改后的版本管理部分 ==========
+def loadVersionProperties() {
+    def versionFile = file('version.properties')
+    if (!versionFile.exists()) {
+        versionFile.text = "buildNumber=0"
+    }
+    
+    Properties versionProps = new Properties()
+    versionFile.withInputStream { versionProps.load(it) }
+    return versionProps
+}
+
+def incrementBuildNumber() {
+    def versionFile = file('version.properties')
+    Properties versionProps = loadVersionProperties()
+    def buildNumber = (versionProps.getProperty('buildNumber', '0').toInteger()) + 1
+    versionProps['buildNumber'] = buildNumber.toString()
+    versionFile.withOutputStream { versionProps.store(it, 'Auto-incremented build number') }
+    return buildNumber
+}
+
+task incrementBuildNumber {
+    doLast {
+        incrementBuildNumber()
+    }
+}
+
+project.afterEvaluate {
+    def versionProps = loadVersionProperties()
+    def currentBuildNumber = versionProps.getProperty('buildNumber', '0').toInteger()
+    
+    // 使用 gradle.properties 中的基础版本号
+    def baseVersion = mod_version
+    version = "${baseVersion}-${String.format("%03d", currentBuildNumber)}"
+    
+    jar {
+        archiveVersion.set("${version}")
+    }
+    
+    println("Current build number: ${currentBuildNumber}")
+    println("Full version: ${version}")
+}
+
+tasks.jar.dependsOn incrementBuildNumber
+// ========== 版本管理部分结束 ==========
+
+version = mod_version // 初始设置，但会被 afterEvaluate 覆盖
+group = mod_group_id
+
+base {
+    archivesName = mod_id
+}
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
+minecraft {
+    mappings channel: mapping_channel, version: mapping_version
+
+    copyIdeResources = true
+
+    runs {
+        configureEach {
+            workingDirectory project.file('run')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+            mods {
+                "${mod_id}" {
+                    source sourceSets.main
+                }
+            }
+        }
+
+        client {
+            property 'forge.enabledGameTestNamespaces', mod_id
+        }
+
+        server {
+            property 'forge.enabledGameTestNamespaces', mod_id
+            args '--nogui'
+        }
+
+        gameTestServer {
+            property 'forge.enabledGameTestNamespaces', mod_id
+        }
+
+        data {
+            workingDirectory project.file('run-data')
+            args '--mod', mod_id, '--all', '--output', file('src/generated/resources/'), '--existing', file('src/main/resources/')
+        }
+    }
+}
+
+sourceSets.main.resources { srcDir 'src/generated/resources' }
+
+repositories {
+    // 仓库配置保持不变
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+    // 其他依赖保持不变
+}
+
+tasks.named('processResources', ProcessResources).configure {
+    var replaceProperties = [
+            minecraft_version: minecraft_version, minecraft_version_range: minecraft_version_range,
+            forge_version: forge_version, forge_version_range: forge_version_range,
+            loader_version_range: loader_version_range,
+            mod_id: mod_id, mod_name: mod_name, mod_license: mod_license, 
+            mod_version: version, // 使用动态生成的完整版本号
+            mod_authors: mod_authors, mod_description: mod_description,
+    ]
+    inputs.properties replaceProperties
+
+    filesMatching(['META-INF/mods.toml', 'pack.mcmeta']) {
+        expand replaceProperties + [project: project]
+    }
+}
+
+tasks.named('jar', Jar).configure {
+    manifest {
+        attributes([
+                'Specification-Title'     : mod_id,
+                'Specification-Vendor'    : mod_authors,
+                'Specification-Version'   : '1',
+                'Implementation-Title'    : project.name,
+                'Implementation-Version'  : project.version, // 使用动态版本号
+                'Implementation-Vendor'   : mod_authors,
+                'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
+
+    finalizedBy 'reobfJar'
+}
+
+publishing {
+    publications {
+        register('mavenJava', MavenPublication) {
+            artifact jar
+        }
+    }
+    repositories {
+        maven {
+            url "file://${project.projectDir}/mcmodsrepo"
+        }
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
