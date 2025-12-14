@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>线路编辑 - 铁路票务系统</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* 移动端优化样式 - 竖排布局 */
+        .line-edit-container {
+            max-width: 100%;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: var(--text);
+        }
+        
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--card-bg);
+            color: var(--text);
+            font-size: 16px;
+            box-sizing: border-box;
+        }
+        
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
+        }
+        
+        .form-hint {
+            display: block;
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-top: 24px;
+        }
+        
+        .btn {
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: var(--accent-dark);
+        }
+        
+        .btn-secondary {
+            background: var(--card-bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        
+        .btn-secondary:hover {
+            background: var(--hover);
+        }
+        
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+        
+        .btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .section-title {
+            margin: 24px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border);
+            color: var(--text);
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .station-list {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--card-bg);
+        }
+        
+        .station-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: move; /* 可拖动 */
+            transition: background 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .station-item:hover {
+            background: var(--hover);
+        }
+        
+        .station-info {
+            flex: 1;
+        }
+        
+        .station-code {
+            font-family: monospace;
+            font-weight: bold;
+            color: var(--accent);
+        }
+        
+        .station-name {
+            margin-left: 8px;
+            color: var(--text);
+        }
+        
+        .station-actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .btn-icon {
+            padding: 6px;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .btn-icon:hover {
+            color: var(--accent);
+        }
+        
+        .color-preview {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            margin-right: 8px;
+            vertical-align: middle;
+            border: 1px solid var(--border);
+        }
+        
+        .available-stations {
+            margin-top: 20px;
+        }
+        
+        .available-station-item {
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .available-station-item:hover {
+            background: var(--hover);
+            border-color: var(--accent);
+        }
+        
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+        
+        /* 移动端适配 */
+        @media (max-width: 480px) {
+            .station-item {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+        
+            .station-actions {
+                margin-top: 8px;
+                align-self: flex-end;
+            }
+        }
+        
+            /* 主题切换按钮 */
+            .theme-toggle {
+              position: absolute;
+              top: 24px;
+              right: 24px;
+              background: var(--surface);
+              border: 1px solid var(--border);
+              border-radius: 12px;
+              padding: 10px 16px;
+              color: var(--text);
+              cursor: pointer;
+              font-weight: 700;
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              transition: all 0.2s ease;
+              z-index: 10;
+            }
+        
+            .theme-toggle:hover {
+              background: var(--card);
+            }
+        
+            .theme-icon {
+              font-size: 18px;
+            }
+    </style>
+    <script src="theme.js"></script>
+</head>
+
+<body>
+    <div class="line-edit-container">
+        <header class="brand" style="margin-bottom: 24px; position: relative;">
+            <div class="brand-title">线路编辑</div>
+            <nav class="tabs">
+                <button class="tab" onclick="window.location.href='index.html'">返回控制台</button>
+            </nav>
+            <button id="themeToggle" class="theme-toggle">
+                <span class="theme-icon">🌙</span>
+                <span id="themeLabel">深色模式</span>
+            </button>
+        </header>
+
+        <div class="form-section">
+            <h3 class="section-title">线路基本信息</h3>
+
+            <div class="form-group">
+                <label class="form-label" for="line-id">线路ID *</label>
+                <input type="text" id="line-id" class="form-input" placeholder="例如: L1">
+                <span class="form-hint">线路唯一标识，创建后不可修改</span>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="line-name">线路名称 *</label>
+                <input type="text" id="line-name" class="form-input" placeholder="例如: 1号线">
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="line-color">线路颜色</label>
+                <div style="display: flex; gap: 12px; align-items: center;">
+                    <span class="color-preview" id="color-preview"></span>
+                    <input type="text" id="line-color" class="form-input" placeholder="#3366CC 或 orange" style="flex: 1;">
+                </div>
+                <span class="form-hint">支持HEX颜色码或颜色名称，用于地图显示</span>
+            </div>
+        </div>
+
+        <div class="form-section" style="margin-top: 40px;">
+            <h3 class="section-title">车站顺序</h3>
+            <div class="form-hint" style="margin-bottom: 16px;">
+                拖动车站调整顺序，点击×移除车站。车站按照从上到下的顺序排列。
+            </div>
+
+            <div id="line-stations-list" class="station-list">
+                <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    暂无车站，从下方添加车站
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section" style="margin-top: 40px;">
+            <h3 class="section-title">添加车站</h3>
+            <div class="form-hint" style="margin-bottom: 16px;">
+                从所有车站中选择添加到当前线路
+            </div>
+
+            <div class="form-group">
+                <input type="text" id="search-available-stations" class="form-input" placeholder="搜索车站编码或名称...">
+            </div>
+
+            <div id="available-stations-list" class="available-stations">
+                <!-- 可用车站列表将通过JavaScript动态加载 -->
+                <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                    加载中...
+                </div>
+            </div>
+        </div>
+
+        <div class="btn-group">
+            <button id="btn-save" class="btn btn-primary">保存线路</button>
+            <button id="btn-new" class="btn btn-secondary">新建线路</button>
+            <button id="btn-delete" class="btn btn-danger" disabled>删除线路</button>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // 全局变量
+        let currentLine = null;
+        let lineStations = []; // 当前线路的车站列表（按顺序）
+        let allStations = []; // 所有可用车站
+        let filteredAvailableStations = [];
+        
+        // 从URL获取线路ID
+        function getLineIdFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('id');
+        }
+        
+        // DOM加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 主题切换功能（使用公共模块）
+            window.ThemeManager.init();
+        
+            const lineId = getLineIdFromUrl();
+        
+            // 绑定按钮事件
+            document.getElementById('btn-save').addEventListener('click', saveLine);
+            document.getElementById('btn-new').addEventListener('click', newLine);
+            document.getElementById('btn-delete').addEventListener('click', deleteLine);
+            document.getElementById('search-available-stations').addEventListener('input', filterAvailableStations);
+            document.getElementById('line-color').addEventListener('input', updateColorPreview);
+        
+            // 初始化颜色预览
+            updateColorPreview();
+        
+            if (lineId) {
+                // 编辑现有线路
+                loadLine(lineId);
+            } else {
+                // 创建新线路
+                newLine();
+            }
+        
+            // 加载所有车站
+            loadAllStations();
+        });
+        
+        // 更新颜色预览
+        function updateColorPreview() {
+            const colorInput = document.getElementById('line-color');
+            const preview = document.getElementById('color-preview');
+            const color = colorInput.value.trim();
+        
+            if (color) {
+                preview.style.backgroundColor = color;
+                preview.style.display = 'inline-block';
+            } else {
+                preview.style.display = 'none';
+            }
+        }
+        
+        // 显示提示消息
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast';
+        
+            // 根据类型设置颜色
+            if (type === 'success') {
+                toast.style.background = 'var(--success-bg, #d4edda)';
+                toast.style.borderColor = 'var(--success-border, #c3e6cb)';
+                toast.style.color = 'var(--success-text, #155724)';
+            } else if (type === 'error') {
+                toast.style.background = 'var(--error-bg, #f8d7da)';
+                toast.style.borderColor = 'var(--error-border, #f5c6cb)';
+                toast.style.color = 'var(--error-text, #721c24)';
+            } else {
+                toast.style.background = 'var(--card-bg)';
+                toast.style.borderColor = 'var(--border)';
+                toast.style.color = 'var(--text)';
+            }
+        
+            toast.classList.add('show');
+        
+            // 3秒后隐藏
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+        
+        // 加载线路数据
+        async function loadLine(lineId) {
+            try {
+                const response = await fetch(`/api/lines/${lineId}`);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+        
+                currentLine = await response.json();
+                lineStations = currentLine.stations || [];
+        
+                // 更新表单
+                document.getElementById('line-id').value = currentLine.id || '';
+                document.getElementById('line-name').value = currentLine.name || '';
+                document.getElementById('line-color').value = currentLine.color || '#3366CC';
+                updateColorPreview();
+        
+                // 启用删除按钮
+                document.getElementById('btn-delete').disabled = false;
+        
+                // 渲染车站列表
+                renderLineStations();
+        
+                showToast('线路加载成功', 'success');
+            } catch (error) {
+                showToast(`加载线路失败: ${error.message}`, 'error');
+                console.error('加载线路失败:', error);
+            }
+        }
+        
+        // 加载所有车站
+        async function loadAllStations() {
+            try {
+                const response = await fetch('/api/stations');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+        
+                allStations = await response.json();
+                filterAvailableStations();
+        
+            } catch (error) {
+                showToast(`加载车站列表失败: ${error.message}`, 'error');
+                console.error('加载车站列表失败:', error);
+            }
+        }
+        
+        // 过滤可用车站（排除已添加的车站）
+        function filterAvailableStations() {
+            const searchTerm = document.getElementById('search-available-stations').value.toLowerCase();
+            const addedStationCodes = lineStations.map(s => s.code);
+        
+            filteredAvailableStations = allStations.filter(station => {
+                // 排除已添加的车站
+                if (addedStationCodes.includes(station.code)) {
+                    return false;
+                }
+        
+                // 搜索过滤
+                if (!searchTerm) return true;
+        
+                return (
+                    (station.code && station.code.toLowerCase().includes(searchTerm)) ||
+                    (station.name && station.name.toLowerCase().includes(searchTerm)) ||
+                    (station.en_name && station.en_name.toLowerCase().includes(searchTerm))
+                );
+            });
+        
+            renderAvailableStations();
+        }
+        
+        // 渲染线路中的车站列表
+        function renderLineStations() {
+            const container = document.getElementById('line-stations-list');
+        
+            if (lineStations.length === 0) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        暂无车站，从下方添加车站
+                    </div>
+                `;
+                return;
+            }
+        
+            let html = '';
+            lineStations.forEach((station, index) => {
+                html += `
+                    <div class="station-item" data-index="${index}" draggable="true">
+                        <div class="station-info">
+                            <span class="station-code">${station.code || ''}</span>
+                            <span class="station-name">${station.name || ''}</span>
+                            ${station.en_name ? `<br><small>${station.en_name}</small>` : ''}
+                        </div>
+                        <div class="station-actions">
+                            <button class="btn-icon" onclick="moveStationUp(${index})" ${index === 0 ? 'disabled' : ''}>↑</button>
+                            <button class="btn-icon" onclick="moveStationDown(${index})" ${index === lineStations.length - 1 ? 'disabled' : ''}>↓</button>
+                            <button class="btn-icon" onclick="removeStationFromLine(${index})">×</button>
+                        </div>
+                    </div>
+                `;
+            });
+        
+            container.innerHTML = html;
+        
+            // 添加拖动支持
+            setupDragAndDrop();
+        }
+        
+        // 渲染可用车站列表
+        function renderAvailableStations() {
+            const container = document.getElementById('available-stations-list');
+        
+            if (filteredAvailableStations.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+                        ${allStations.length === 0 ? '暂无车站数据' : '无匹配的车站'}
+                    </div>
+                `;
+                return;
+            }
+        
+            let html = '';
+            filteredAvailableStations.forEach(station => {
+                html += `
+                    <div class="available-station-item" onclick="addStationToLine('${station.code}')">
+                        <strong>${station.code || ''}</strong> - ${station.name || ''}
+                        ${station.en_name ? `<br><small>${station.en_name}</small>` : ''}
+                    </div>
+                `;
+            });
+        
+            container.innerHTML = html;
+        }
+        
+        // 设置拖动排序
+        function setupDragAndDrop() {
+            const container = document.getElementById('line-stations-list');
+            let draggedItem = null;
+        
+            container.querySelectorAll('.station-item[draggable="true"]').forEach(item => {
+                item.addEventListener('dragstart', function(e) {
+                    draggedItem = this;
+                    setTimeout(() => {
+                        this.style.opacity = '0.4';
+                    }, 0);
+                });
+        
+                item.addEventListener('dragend', function(e) {
+                    setTimeout(() => {
+                        draggedItem.style.opacity = '';
+                        draggedItem = null;
+                    }, 0);
+                });
+        
+                item.addEventListener('dragover', function(e) {
+                    e.preventDefault();
+                });
+        
+                item.addEventListener('drop', function(e) {
+                    e.preventDefault();
+                    if (draggedItem !== this) {
+                        const fromIndex = parseInt(draggedItem.dataset.index);
+                        const toIndex = parseInt(this.dataset.index);
+        
+                        // 移动数组元素
+                        const [movedStation] = lineStations.splice(fromIndex, 1);
+                        lineStations.splice(toIndex, 0, movedStation);
+        
+                        // 重新渲染
+                        renderLineStations();
+                    }
+                });
+            });
+        }
+        
+        // 向上移动车站
+        function moveStationUp(index) {
+            if (index > 0) {
+                [lineStations[index], lineStations[index - 1]] = [lineStations[index - 1], lineStations[index]];
+                renderLineStations();
+            }
+        }
+        
+        // 向下移动车站
+        function moveStationDown(index) {
+            if (index < lineStations.length - 1) {
+                [lineStations[index], lineStations[index + 1]] = [lineStations[index + 1], lineStations[index]];
+                renderLineStations();
+            }
+        }
+        
+        // 从线路中移除车站
+        function removeStationFromLine(index) {
+            lineStations.splice(index, 1);
+            renderLineStations();
+            filterAvailableStations(); // 更新可用车站列表
+        }
+        
+        // 添加车站到线路
+        function addStationToLine(stationCode) {
+            const station = allStations.find(s => s.code === stationCode);
+            if (station) {
+                lineStations.push(station);
+                renderLineStations();
+                filterAvailableStations(); // 更新可用车站列表
+                showToast(`已添加车站: ${station.name}`, 'success');
+            }
+        }
+        
+        // 保存线路
+        async function saveLine() {
+            const lineId = document.getElementById('line-id').value.trim();
+            const lineName = document.getElementById('line-name').value.trim();
+            const lineColor = document.getElementById('line-color').value.trim();
+        
+            if (!lineId) {
+                showToast('请输入线路ID', 'error');
+                return;
+            }
+        
+            if (!lineName) {
+                showToast('请输入线路名称', 'error');
+                return;
+            }
+        
+            if (lineStations.length < 2) {
+                showToast('线路至少需要2个车站', 'error');
+                return;
+            }
+        
+            const lineData = {
+                id: lineId,
+                name: lineName,
+                color: lineColor || '#3366CC',
+                stations: lineStations.map(s => s.code) // 只存储车站编码
+            };
+        
+            try {
+                const method = currentLine ? 'PUT' : 'POST';
+                const url = currentLine ? `/api/lines/${lineId}` : '/api/lines';
+        
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(lineData)
+                });
+        
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+        
+                showToast('线路保存成功', 'success');
+        
+                // 如果是新建线路，更新当前线路对象
+                if (!currentLine) {
+                    currentLine = lineData;
+                    document.getElementById('btn-delete').disabled = false;
+        
+                    // 更新URL但不刷新页面
+                    const newUrl = new URL(window.location);
+                    newUrl.searchParams.set('id', lineId);
+                    window.history.replaceState({}, '', newUrl);
+                }
+        
+            } catch (error) {
+                showToast(`保存失败: ${error.message}`, 'error');
+                console.error('保存线路失败:', error);
+            }
+        }
+        
+        // 新建线路
+        function newLine() {
+            currentLine = null;
+            lineStations = [];
+        
+            // 清空表单
+            document.getElementById('line-id').value = '';
+            document.getElementById('line-name').value = '';
+            document.getElementById('line-color').value = '#3366CC';
+            updateColorPreview();
+        
+            // 禁用删除按钮
+            document.getElementById('btn-delete').disabled = true;
+        
+            // 清空车站列表
+            renderLineStations();
+            filterAvailableStations();
+        
+            // 移除URL中的ID参数
+            const newUrl = new URL(window.location);
+            newUrl.searchParams.delete('id');
+            window.history.replaceState({}, '', newUrl);
+        
+            showToast('已准备新建线路', 'info');
+        }
+        
+        // 删除线路
+        async function deleteLine() {
+            if (!currentLine || !confirm('确定要删除这条线路吗？此操作不可恢复。')) {
+                return;
+            }
+        
+            try {
+                const response = await fetch(`/api/lines/${currentLine.id}`, {
+                    method: 'DELETE'
+                });
+        
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+        
+                showToast('线路删除成功', 'success');
+        
+                // 返回到线路选择页面
+                setTimeout(() => {
+                    window.location.href = 'index.html#tab-line-select';
+                }, 1500);
+        
+            } catch (error) {
+                showToast(`删除失败: ${error.message}`, 'error');
+                console.error('删除线路失败:', error);
+            }
+        }
+    </script>
+</body>
+
+</html>
