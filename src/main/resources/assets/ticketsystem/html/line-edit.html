@@ -246,6 +246,41 @@
             .theme-icon {
               font-size: 18px;
             }
+
+            /* 选项卡样式 */
+            .tab-button.active {
+                border-bottom-color: var(--accent) !important;
+                color: var(--accent) !important;
+                font-weight: bold;
+            }
+            .tab-content {
+                display: none;
+            }
+            .tab-content.active {
+                display: block;
+            }
+            .fare-item {
+                padding: 12px;
+                border-bottom: 1px solid var(--border);
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+            }
+            .fare-info {
+                flex: 1;
+            }
+            .fare-price-input {
+                width: 100px;
+                padding: 6px;
+                border: 1px solid var(--border);
+                border-radius: 4px;
+                background: var(--card-bg);
+                color: var(--text);
+            }
+            .fare-actions {
+                display: flex;
+                gap: 8px;
+            }
     </style>
     <script src="theme.js"></script>
 </head>
@@ -288,14 +323,45 @@
         </div>
 
         <div class="form-section" style="margin-top: 40px;">
-            <h3 class="section-title">车站顺序</h3>
-            <div class="form-hint" style="margin-bottom: 16px;">
-                拖动车站调整顺序，点击×移除车站。车站按照从上到下的顺序排列。
+            <div class="tabs-header" style="display: flex; border-bottom: 2px solid var(--border); margin-bottom: 20px;">
+                <button class="tab-button active" data-tab="stations-tab" onclick="switchTab('stations-tab')" style="padding: 10px 20px; border: none; background: transparent; font-size: 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-right: 10px; color: var(--text);">
+                    车站顺序
+                </button>
+                <button class="tab-button" data-tab="fares-tab" onclick="switchTab('fares-tab')" style="padding: 10px 20px; border: none; background: transparent; font-size: 16px; cursor: pointer; border-bottom: 2px solid transparent; margin-right: 10px; color: var(--text);">
+                    票价管理
+                </button>
             </div>
 
-            <div id="line-stations-list" class="station-list">
-                <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
-                    暂无车站，从下方添加车站
+            <!-- 车站顺序选项卡 -->
+            <div id="stations-tab" class="tab-content active">
+                <div class="form-hint" style="margin-bottom: 16px;">
+                    拖动车站调整顺序，点击×移除车站。车站按照从上到下的顺序排列。
+                </div>
+
+                <div id="line-stations-list" class="station-list">
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        暂无车站，从下方添加车站
+                    </div>
+                </div>
+            </div>
+
+            <!-- 票价管理选项卡 -->
+            <div id="fares-tab" class="tab-content" style="display: none;">
+                <div class="form-hint" style="margin-bottom: 16px;">
+                    为线路中相邻车站设置票价。票价按铜币计算。
+                </div>
+
+                <div id="fares-list-container">
+                    <div id="fares-list" class="station-list">
+                        <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                            请先添加至少2个车站以设置票价
+                        </div>
+                    </div>
+
+                    <div style="margin-top: 20px;">
+                        <button id="btn-batch-set-fare" class="btn btn-secondary" onclick="showBatchFareDialog()" style="margin-right: 10px;" disabled>批量设置票价</button>
+                        <button id="btn-refresh-fares" class="btn btn-secondary" onclick="loadFares()">刷新票价</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -331,6 +397,7 @@
         // 全局变量
         let currentLine = null;
         let lineStations = []; // 当前线路的车站列表（按顺序）
+        let lineStationCodes = []; // 车站代码数组（从API获取）
         let allStations = []; // 所有可用车站
         let filteredAvailableStations = [];
         
@@ -421,7 +488,7 @@
                 }
         
                 currentLine = await response.json();
-                lineStations = currentLine.stations || [];
+                lineStationCodes = currentLine.stations || [];
         
                 // 更新表单
                 document.getElementById('line-id').value = currentLine.id || '';
@@ -432,8 +499,8 @@
                 // 启用删除按钮
                 document.getElementById('btn-delete').disabled = false;
         
-                // 渲染车站列表
-                renderLineStations();
+                // 解析车站对象并渲染列表
+                resolveLineStations();
         
                 showToast('线路加载成功', 'success');
             } catch (error) {
@@ -441,7 +508,20 @@
                 console.error('加载线路失败:', error);
             }
         }
-        
+
+        // 解析线路车站代码为完整车站对象
+        function resolveLineStations() {
+            // 将车站代码数组映射为完整车站对象
+            lineStations = lineStationCodes.map(code => {
+                const station = allStations.find(s => s.code === code);
+                return station || { code: code, name: code, en_name: '' };
+            });
+            // 更新车站列表显示
+            renderLineStations();
+            // 更新可用车站过滤
+            filterAvailableStations();
+        }
+
         // 加载所有车站
         async function loadAllStations() {
             try {
@@ -452,6 +532,7 @@
         
                 allStations = await response.json();
                 filterAvailableStations();
+                resolveLineStations();
         
             } catch (error) {
                 showToast(`加载车站列表失败: ${error.message}`, 'error');
@@ -688,6 +769,7 @@
         function newLine() {
             currentLine = null;
             lineStations = [];
+            lineStationCodes = [];
         
             // 清空表单
             document.getElementById('line-id').value = '';
@@ -735,6 +817,281 @@
             } catch (error) {
                 showToast(`删除失败: ${error.message}`, 'error');
                 console.error('删除线路失败:', error);
+            }
+        }
+
+        // 选项卡切换
+        function switchTab(tabId) {
+            // 隐藏所有选项卡内容
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+                content.style.display = 'none';
+            });
+
+            // 移除所有按钮的active类
+            document.querySelectorAll('.tab-button').forEach(button => {
+                button.classList.remove('active');
+            });
+
+            // 显示选中的选项卡内容
+            const selectedTab = document.getElementById(tabId);
+            if (selectedTab) {
+                selectedTab.classList.add('active');
+                selectedTab.style.display = 'block';
+            }
+
+            // 激活对应的按钮
+            const selectedButton = document.querySelector(`.tab-button[data-tab="${tabId}"]`);
+            if (selectedButton) {
+                selectedButton.classList.add('active');
+            }
+
+            // 如果切换到票价管理选项卡，加载票价数据
+            if (tabId === 'fares-tab') {
+                loadFares();
+            }
+        }
+
+        // 加载票价数据
+        async function loadFares() {
+            if (lineStations.length < 2) {
+                document.getElementById('fares-list').innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        请先添加至少2个车站以设置票价
+                    </div>
+                `;
+                document.getElementById('btn-batch-set-fare').disabled = true;
+                return;
+            }
+
+            document.getElementById('btn-batch-set-fare').disabled = false;
+
+            try {
+                // 获取所有票价数据
+                const response = await fetch('/api/fares');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const allFares = await response.json();
+
+                // 生成相邻车站对
+                const fareSegments = [];
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const fromStation = lineStations[i];
+                    const toStation = lineStations[i + 1];
+
+                    // 查找票价
+                    const fare = allFares.find(f =>
+                        (f.fromStation === fromStation.code && f.toStation === toStation.code) ||
+                        (f.fromStation === toStation.code && f.toStation === fromStation.code)
+                    );
+
+                    fareSegments.push({
+                        from: fromStation,
+                        to: toStation,
+                        fare: fare,
+                        index: i
+                    });
+                }
+
+                renderFaresList(fareSegments);
+
+            } catch (error) {
+                showToast(`加载票价失败: ${error.message}`, 'error');
+                console.error('加载票价失败:', error);
+            }
+        }
+
+        // 渲染票价列表
+        function renderFaresList(fareSegments) {
+            const container = document.getElementById('fares-list');
+
+            if (fareSegments.length === 0) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        请先添加至少2个车站以设置票价
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+            fareSegments.forEach(segment => {
+                const currentPrice = (segment.fare && segment.fare.price != null) ? segment.fare.price : 0;
+                html += `
+                    <div class="fare-item" data-index="${segment.index}">
+                        <div class="fare-info">
+                            <div>
+                                <strong>${segment.from.name} (${segment.from.code})</strong>
+                                →
+                                <strong>${segment.to.name} (${segment.to.code})</strong>
+                            </div>
+                            <div style="margin-top: 4px; font-size: 14px; color: var(--text-secondary);">
+                                区间 ${segment.index + 1}/${fareSegments.length}
+                            </div>
+                        </div>
+                        <div class="fare-actions">
+                            <input type="number"
+                                   class="fare-price-input"
+                                   id="fare-price-${segment.index}"
+                                   value="${currentPrice}"
+                                   min="1"
+                                   max="9999"
+                                   placeholder="票价">
+                            <button class="btn-icon" onclick="saveFare(${segment.index})">保存</button>
+                            <button class="btn-icon" onclick="deleteFare(${segment.index})" ${currentPrice === 0 ? 'disabled' : ''}>删除</button>
+                        </div>
+                    </div>
+                `;
+            });
+
+            container.innerHTML = html;
+        }
+
+        // 保存票价
+        async function saveFare(segmentIndex) {
+            if (segmentIndex < 0 || segmentIndex >= lineStations.length - 1) {
+                return;
+            }
+
+            const fromStation = lineStations[segmentIndex];
+            const toStation = lineStations[segmentIndex + 1];
+            const priceInput = document.getElementById(`fare-price-${segmentIndex}`);
+            const price = parseInt(priceInput.value);
+
+            if (!price || price < 1) {
+                showToast('请输入有效的票价（大于0）', 'error');
+                return;
+            }
+
+            try {
+                const fareData = {
+                    fromStation: fromStation.code,
+                    toStation: toStation.code,
+                    price: price
+                };
+
+                // 检查是否已存在票价
+                const checkResponse = await fetch(`/api/fares/${fromStation.code}/${toStation.code}`);
+                const method = checkResponse.ok ? 'PUT' : 'POST';
+                const url = method === 'PUT'
+                    ? `/api/fares/${fromStation.code}/${toStation.code}`
+                    : '/api/fares';
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(fareData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                showToast('票价保存成功', 'success');
+
+                // 重新加载票价列表
+                loadFares();
+
+            } catch (error) {
+                showToast(`保存票价失败: ${error.message}`, 'error');
+                console.error('保存票价失败:', error);
+            }
+        }
+
+        // 删除票价
+        async function deleteFare(segmentIndex) {
+            if (segmentIndex < 0 || segmentIndex >= lineStations.length - 1) {
+                return;
+            }
+
+            const fromStation = lineStations[segmentIndex];
+            const toStation = lineStations[segmentIndex + 1];
+
+            if (!confirm(`确定要删除 ${fromStation.name} → ${toStation.name} 的票价吗？`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/fares/${fromStation.code}/${toStation.code}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                showToast('票价删除成功', 'success');
+
+                // 重新加载票价列表
+                loadFares();
+
+            } catch (error) {
+                showToast(`删除票价失败: ${error.message}`, 'error');
+                console.error('删除票价失败:', error);
+            }
+        }
+
+        // 显示批量设置票价对话框
+        function showBatchFareDialog() {
+            const price = prompt('请输入统一的票价（铜币）:', '10');
+            if (price === null) return;
+
+            const priceNum = parseInt(price);
+            if (!priceNum || priceNum < 1) {
+                showToast('请输入有效的票价（大于0）', 'error');
+                return;
+            }
+
+            if (confirm(`确定要为所有${lineStations.length - 1}个区间设置统一票价 ${priceNum} 铜币吗？`)) {
+                batchSetFare(priceNum);
+            }
+        }
+
+        // 批量设置票价
+        async function batchSetFare(price) {
+            try {
+                const promises = [];
+
+                for (let i = 0; i < lineStations.length - 1; i++) {
+                    const fromStation = lineStations[i];
+                    const toStation = lineStations[i + 1];
+
+                    const fareData = {
+                        fromStation: fromStation.code,
+                        toStation: toStation.code,
+                        price: price
+                    };
+
+                    // 检查是否已存在票价
+                    const checkResponse = await fetch(`/api/fares/${fromStation.code}/${toStation.code}`);
+                    const method = checkResponse.ok ? 'PUT' : 'POST';
+                    const url = method === 'PUT'
+                        ? `/api/fares/${fromStation.code}/${toStation.code}`
+                        : '/api/fares';
+
+                    promises.push(
+                        fetch(url, {
+                            method: method,
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            body: JSON.stringify(fareData)
+                        })
+                    );
+                }
+
+                await Promise.all(promises);
+                showToast(`成功为${lineStations.length - 1}个区间设置票价`, 'success');
+
+                // 重新加载票价列表
+                loadFares();
+
+            } catch (error) {
+                showToast(`批量设置票价失败: ${error.message}`, 'error');
+                console.error('批量设置票价失败:', error);
             }
         }
     </script>

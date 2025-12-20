@@ -2,6 +2,7 @@ package com.easttown.ticketsystem.data;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * 线路数据类 - 参考web版本的lines.json结构
@@ -13,6 +14,8 @@ public class Line {
     private String enName;           // 线路英文名称（可选）
     private String color;            // 线路颜色，如"#FF0000"或颜色名称
     private List<String> stationCodes; // 车站编码列表（有序）
+    private final String uuid;       // 全局唯一标识符（纯随机）
+    private String customId;         // 自定义编号（用户可设置）
 
     public Line(String id, String name, String color) {
         this.id = id;
@@ -20,6 +23,8 @@ public class Line {
         this.enName = "";
         this.color = color;
         this.stationCodes = new ArrayList<>();
+        this.uuid = UUID.randomUUID().toString();
+        this.customId = "";
     }
 
     public Line(String id, String name, String enName, String color) {
@@ -28,6 +33,21 @@ public class Line {
         this.enName = enName;
         this.color = color;
         this.stationCodes = new ArrayList<>();
+        this.uuid = UUID.randomUUID().toString();
+        this.customId = "";
+    }
+
+    /**
+     * 全参数构造函数（用于数据加载/反序列化）
+     */
+    public Line(String id, String name, String enName, String color, List<String> stationCodes, String uuid, String customId) {
+        this.id = id;
+        this.name = name;
+        this.enName = enName;
+        this.color = color;
+        this.stationCodes = stationCodes != null ? stationCodes : new ArrayList<>();
+        this.uuid = uuid != null ? uuid : UUID.randomUUID().toString();
+        this.customId = customId != null ? customId : "";
     }
 
     // Getter方法
@@ -51,6 +71,14 @@ public class Line {
         return stationCodes;
     }
 
+    public String getUuid() {
+        return uuid;
+    }
+
+    public String getCustomId() {
+        return customId;
+    }
+
     // Setter方法（除了id是final）
     public void setName(String name) {
         this.name = name;
@@ -66,6 +94,10 @@ public class Line {
 
     public void setStationCodes(List<String> stationCodes) {
         this.stationCodes = stationCodes;
+    }
+
+    public void setCustomId(String customId) {
+        this.customId = customId != null ? customId : "";
     }
 
     // 便捷方法
@@ -150,8 +182,8 @@ public class Line {
 
     @Override
     public String toString() {
-        return String.format("Line{id='%s', name='%s', enName='%s', color='%s', stations=%d}",
-                id, name, enName, color, stationCodes.size());
+        return String.format("Line{id='%s', name='%s', enName='%s', color='%s', stations=%d, uuid='%s', customId='%s'}",
+                id, name, enName, color, stationCodes.size(), uuid, customId);
     }
 
     @Override

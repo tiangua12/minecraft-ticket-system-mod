@@ -256,8 +256,7 @@
           </div>
           <div id="station-edit-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
             <p style="color: var(--muted); margin-bottom: 20px; text-align: center;">
-              车站编辑功能仍在独立页面提供最佳体验。
-              <br>正在加载车站编辑页面...
+              车站编辑功能已迁移到独立页面，请点击下方按钮前往。
             </p>
             <div style="text-align: center;">
               <a id="station-edit-link" href="station-edit.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往车站编辑页面</a>
@@ -318,8 +317,7 @@
           </div>
           <div id="line-edit-container" style="background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 24px;">
             <p style="color: var(--muted); margin-bottom: 20px; text-align: center;">
-              线路编辑功能仍在独立页面提供最佳体验。
-              <br>正在加载线路编辑页面...
+              线路编辑功能已迁移到独立页面，请点击下方按钮前往。
             </p>
             <div style="text-align: center;">
               <a id="line-edit-link" href="line-edit.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往线路编辑页面</a>
@@ -335,7 +333,7 @@
         <div style="font-size: 48px; margin-bottom: 20px;">🎫</div>
         <h2 style="color: var(--text); margin-bottom: 16px;">票务管理功能已独立</h2>
         <p style="color: var(--muted); max-width: 500px; margin: 0 auto 30px;">
-          票务管理功能已迁移到独立控制台页面，提供完整的票务操作界面。
+          票务管理功能已迁移到独立控制台页面，请点击下方按钮前往。
         </p>
         <a href="console.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往票务管理页面</a>
       </div>
@@ -347,7 +345,7 @@
         <div style="font-size: 48px; margin-bottom: 20px;">📝</div>
         <h2 style="color: var(--text); margin-bottom: 16px;">操作日志功能已独立</h2>
         <p style="color: var(--muted); max-width: 500px; margin: 0 auto 30px;">
-          操作日志功能已迁移到独立页面，支持分组视图、时间线与高级筛选。
+          操作日志功能已迁移到独立页面，请点击下方按钮前往。
         </p>
         <a href="logs.html" class="btn primary" style="padding: 12px 32px; font-size: 16px;">前往操作日志页面</a>
       </div>
@@ -741,6 +739,19 @@
       tab.addEventListener('click', () => {
         const targetTab = tab.getAttribute('data-tab');
 
+        // 检查是否为需要直接跳转的标签
+        if (targetTab === 'ticket') {
+          // 直接跳转到票务管理页面
+          window.location.href = 'console.html';
+          return;
+        }
+
+        if (targetTab === 'logs') {
+          // 直接跳转到操作日志页面
+          window.location.href = 'logs.html';
+          return;
+        }
+
         // 更新标签状态
         tabs.forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
@@ -922,15 +933,8 @@
 
       // 编辑线路
       function editLine(lineId) {
-        // 切换到编辑视图
-        lineListView.style.display = 'none';
-        lineEditView.style.display = 'block';
-
-        // 更新编辑页面链接
-        if (lineEditLink) {
-          lineEditLink.href = `line-edit.html?id=${encodeURIComponent(lineId)}`;
-          lineEditLink.textContent = `编辑线路: ${lineId}`;
-        }
+        // 直接跳转到线路编辑页面
+        window.location.href = `line-edit.html?id=${encodeURIComponent(lineId)}`;
       }
 
       // 删除线路
@@ -959,15 +963,8 @@
       // 事件监听器
       if (btnNewLine) {
         btnNewLine.addEventListener('click', () => {
-          // 切换到编辑视图（新建模式）
-          lineListView.style.display = 'none';
-          lineEditView.style.display = 'block';
-
-          // 更新编辑页面链接
-          if (lineEditLink) {
-            lineEditLink.href = 'line-edit.html';
-            lineEditLink.textContent = '创建新线路';
-          }
+          // 直接跳转到线路编辑页面（新建模式）
+          window.location.href = 'line-edit.html';
         });
       }
 
@@ -1109,15 +1106,8 @@
 
       // 编辑车站
       function editStation(stationCode) {
-        // 切换到编辑视图
-        stationListView.style.display = 'none';
-        stationEditView.style.display = 'block';
-
-        // 更新编辑页面链接
-        if (stationEditLink) {
-          stationEditLink.href = `station-edit.html?code=${encodeURIComponent(stationCode)}`;
-          stationEditLink.textContent = `编辑车站: ${stationCode}`;
-        }
+        // 直接跳转到车站编辑页面
+        window.location.href = `station-edit.html?code=${encodeURIComponent(stationCode)}`;
       }
 
       // 删除车站
@@ -1146,15 +1136,8 @@
       // 事件监听器
       if (btnNewStation) {
         btnNewStation.addEventListener('click', () => {
-          // 切换到编辑视图（新建模式）
-          stationListView.style.display = 'none';
-          stationEditView.style.display = 'block';
-
-          // 更新编辑页面链接
-          if (stationEditLink) {
-            stationEditLink.href = 'station-edit.html';
-            stationEditLink.textContent = '创建新车站';
-          }
+          // 直接跳转到车站编辑页面（新建模式）
+          window.location.href = 'station-edit.html';
         });
       }
 

@@ -1,5 +1,7 @@
 package com.easttown.ticketsystem.data;
 
+import java.util.UUID;
+
 /**
  * 车站数据类 - 参考web版本的stations.json结构
  * 文档要求：删除双票价系统，简化实现，参考web版本数据结构
@@ -10,6 +12,8 @@ public class Station {
     private String enName;           // 车站英文名称（可选）
     private int x, y, z;             // 坐标（用于Minecraft地图显示）
     private int stationNumber;       // 站序号（在线路中的顺序）
+    private final String uuid;       // 全局唯一标识符（纯随机）
+    private String customId;         // 自定义编号（用户可设置）
 
     public Station(String code, String name) {
         this.code = code;
@@ -19,6 +23,8 @@ public class Station {
         this.y = 0;
         this.z = 0;
         this.stationNumber = 0;
+        this.uuid = UUID.randomUUID().toString();
+        this.customId = "";
     }
 
     public Station(String code, String name, String enName, int x, int y, int z) {
@@ -29,6 +35,8 @@ public class Station {
         this.y = y;
         this.z = z;
         this.stationNumber = 0;
+        this.uuid = UUID.randomUUID().toString();
+        this.customId = "";
     }
 
     public Station(String code, String name, String enName, int x, int y, int z, int stationNumber) {
@@ -39,6 +47,23 @@ public class Station {
         this.y = y;
         this.z = z;
         this.stationNumber = stationNumber;
+        this.uuid = UUID.randomUUID().toString();
+        this.customId = "";
+    }
+
+    /**
+     * 全参数构造函数（用于数据加载/反序列化）
+     */
+    public Station(String code, String name, String enName, int x, int y, int z, int stationNumber, String uuid, String customId) {
+        this.code = code;
+        this.name = name;
+        this.enName = enName;
+        this.x = x;
+        this.y = y;
+        this.z = z;
+        this.stationNumber = stationNumber;
+        this.uuid = uuid != null ? uuid : UUID.randomUUID().toString();
+        this.customId = customId != null ? customId : "";
     }
 
     // Getter方法
@@ -64,6 +89,14 @@ public class Station {
 
     public int getZ() {
         return z;
+    }
+
+    public String getUuid() {
+        return uuid;
+    }
+
+    public String getCustomId() {
+        return customId;
     }
 
     // Setter方法（除了code是final）
@@ -95,6 +128,10 @@ public class Station {
         this.stationNumber = stationNumber;
     }
 
+    public void setCustomId(String customId) {
+        this.customId = customId != null ? customId : "";
+    }
+
     /**
      * 设置坐标
      */
@@ -117,8 +154,8 @@ public class Station {
 
     @Override
     public String toString() {
-        return String.format("Station{code='%s', name='%s', enName='%s', x=%d, y=%d, z=%d, stationNumber=%d}",
-                code, name, enName, x, y, z, stationNumber);
+        return String.format("Station{code='%s', name='%s', enName='%s', x=%d, y=%d, z=%d, stationNumber=%d, uuid='%s', customId='%s'}",
+                code, name, enName, x, y, z, stationNumber, uuid, customId);
     }
 
     @Override

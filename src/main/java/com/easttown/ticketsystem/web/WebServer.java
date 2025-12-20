@@ -628,6 +628,49 @@ public class WebServer {
         }
 
         private void handleGetFares(HttpExchange exchange) throws IOException {
+            String path = exchange.getRequestURI().getPath();
+            String[] parts = path.split("/");
+
+            // 检查是否为获取特定票价: /api/fares/{from}/{to}
+            if (parts.length >= 5) {
+                String from = parts[3];
+                String to = parts[4];
+
+                // 检查票价是否存在
+                boolean hasFare = NetworkManager.hasFare(from, to);
+                if (!hasFare) {
+                    // 也检查反向
+                    hasFare = NetworkManager.hasFare(to, from);
+                    if (!hasFare) {
+                        sendError(exchange, 404, "Fare not found");
+                        return;
+                    }
+                    // 如果反向存在，交换from和to以获取正确方向
+                    String temp = from;
+                    from = to;
+                    to = temp;
+                }
+
+                // 获取票价
+                Fare fare = NetworkManager.getFare(from, to);
+                if (fare == null) {
+                    sendError(exchange, 404, "Fare not found");
+                    return;
+                }
+
+                Map<String, Object> fareData = new HashMap<>();
+                fareData.put("from", fare.getFromStation());
+                fareData.put("to", fare.getToStation());
+                fareData.put("cost", fare.getPrice());
+                fareData.put("cost_regular", fare.getPrice());
+                fareData.put("cost_express", fare.getPrice());
+                fareData.put("price", fare.getPrice()); // 添加price字段
+
+                sendJsonResponse(exchange, 200, fareData);
+                return;
+            }
+
+            // 否则返回所有票价列表
             Collection<Fare> fares = NetworkManager.getAllFares();
 
             List<Map<String, Object>> fareList = new ArrayList<>();
@@ -639,6 +682,7 @@ public class WebServer {
                 // 注意：web版本有cost_regular和cost_express，这里简化
                 fareData.put("cost_regular", fare.getPrice());
                 fareData.put("cost_express", fare.getPrice());
+                fareData.put("price", fare.getPrice()); // 添加price字段
                 fareList.add(fareData);
             }
 
@@ -655,8 +699,15 @@ public class WebServer {
             }
 
             // 单个票价添加
+            // 支持多种字段名: from/fromStation, to/toStation
             String from = (String) body.get("from");
+            if (from == null || from.isEmpty()) {
+                from = (String) body.get("fromStation");
+            }
             String to = (String) body.get("to");
+            if (to == null || to.isEmpty()) {
+                to = (String) body.get("toStation");
+            }
 
             // 优先使用cost_regular，其次使用cost，最后使用price
             Object costRegularObj = body.get("cost_regular");
@@ -803,8 +854,25 @@ public class WebServer {
             // PUT用于更新票价
             Map<String, Object> body = parseRequestBody(exchange);
 
+            // 支持多种字段名: from/fromStation, to/toStation
             String from = (String) body.get("from");
+            if (from == null || from.isEmpty()) {
+                from = (String) body.get("fromStation");
+            }
             String to = (String) body.get("to");
+            if (to == null || to.isEmpty()) {
+                to = (String) body.get("toStation");
+            }
+
+            // 如果请求体中没有，尝试从路径参数获取
+            if (from == null || from.isEmpty() || to == null || to.isEmpty()) {
+                String path = exchange.getRequestURI().getPath();
+                String[] parts = path.split("/");
+                if (parts.length >= 5) {
+                    from = parts[3];
+                    to = parts[4];
+                }
+            }
 
             // 优先使用cost_regular，其次使用cost，最后使用price
             Object costRegularObj = body.get("cost_regular");
@@ -833,10 +901,19 @@ public class WebServer {
                 return;
             }
 
-            // 检查票价是否存在
-            if (!NetworkManager.hasFare(from, to)) {
-                sendError(exchange, 404, "Fare not found");
-                return;
+            // 检查票价是否存在（支持双向）
+            boolean hasFare = NetworkManager.hasFare(from, to);
+            if (!hasFare) {
+                // 检查反向
+                hasFare = NetworkManager.hasFare(to, from);
+                if (!hasFare) {
+                    sendError(exchange, 404, "Fare not found");
+                    return;
+                }
+                // 如果反向存在，交换from和to以更新正确方向
+                String temp = from;
+                from = to;
+                to = temp;
             }
 
             // 移除旧票价，添加新票价
@@ -858,8 +935,15 @@ public class WebServer {
             // DELETE方法：从请求体中获取from和to
             Map<String, Object> body = parseRequestBody(exchange);
 
+            // 支持多种字段名: from/fromStation, to/toStation
             String from = (String) body.get("from");
+            if (from == null || from.isEmpty()) {
+                from = (String) body.get("fromStation");
+            }
             String to = (String) body.get("to");
+            if (to == null || to.isEmpty()) {
+                to = (String) body.get("toStation");
+            }
 
             if (from == null || from.isEmpty() || to == null || to.isEmpty()) {
                 // 尝试从路径参数获取
@@ -1093,7 +1177,13 @@ public class WebServer {
                     stations.add(Map.of(
                         "code", station.getCode(),
                         "name", station.getName(),
-                        "en_name", station.getEnName()
+                        "en_name", station.getEnName(),
+                        "x", station.getX(),
+                        "y", station.getY(),
+                        "z", station.getZ(),
+                        "station_number", station.getStationNumber(),
+                        "uuid", station.getUuid(),
+                        "custom_id", station.getCustomId()
                     ));
                 }
                 export.put("stations", stations);
@@ -1106,7 +1196,9 @@ public class WebServer {
                         "name", line.getName(),
                         "en_name", line.getEnName(),
                         "color", line.getColor(),
-                        "stations", line.getStationCodes()
+                        "stations", line.getStationCodes(),
+                        "uuid", line.getUuid(),
+                        "custom_id", line.getCustomId()
                     ));
                 }
                 export.put("lines", lines);
@@ -1117,9 +1209,12 @@ public class WebServer {
                     fares.add(Map.of(
                         "from", fare.getFromStation(),
                         "to", fare.getToStation(),
+                        "fromStation", fare.getFromStation(),  // 兼容前端字段名
+                        "toStation", fare.getToStation(),      // 兼容前端字段名
                         "cost", fare.getPrice(),
                         "cost_regular", fare.getPrice(),
-                        "cost_express", fare.getPrice()
+                        "cost_express", fare.getPrice(),
+                        "price", fare.getPrice()               // 前端使用的字段名
                     ));
                 }
                 export.put("fares", fares);

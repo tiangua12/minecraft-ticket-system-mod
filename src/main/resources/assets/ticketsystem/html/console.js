@@ -514,14 +514,31 @@
     // 6. 构建表格
     const table = document.createElement('table');
     table.className = 'fare-grid';
+    // 表格样式 - 确保导出时清晰可见
+    table.style.borderCollapse = 'separate';
+    table.style.borderSpacing = '2px';
+    table.style.fontFamily = 'Segoe UI, sans-serif';
 
     // 表头
     const thead = document.createElement('thead');
     const trh = document.createElement('tr');
-    trh.appendChild(document.createElement('th')); // 左上角空白
+    const cornerTh = document.createElement('th'); // 左上角空白
+    cornerTh.style.padding = '10px 12px';
+    cornerTh.style.fontSize = '13px';
+    cornerTh.style.fontWeight = 'bold';
+    cornerTh.style.backgroundColor = '#1a1a1a';
+    trh.appendChild(cornerTh);
     for (const g of displayGroups) {
       const th = document.createElement('th');
       th.innerHTML = `<div class="label-cn">${g.name || g.codes[0]}</div><div class="label-en">${g.en_name || ''}</div><div class="label-code">${(g.codes || []).join(' | ')}</div>`;
+      // 表头样式 - 确保导出清晰
+      th.style.padding = '10px 12px';
+      th.style.fontSize = '13px';
+      th.style.fontWeight = 'bold';
+      th.style.backgroundColor = '#1a1a1a';
+      th.style.color = '#e5e5e5';
+      th.style.textAlign = 'center';
+      th.style.whiteSpace = 'nowrap';
       trh.appendChild(th);
     }
     thead.appendChild(trh);
@@ -533,13 +550,31 @@
       const tr = document.createElement('tr');
       const th = document.createElement('th');
       th.innerHTML = `<div class="label-cn">${ga.name || ga.codes[0]}</div><div class="label-en">${ga.en_name || ''}</div><div class="label-code">${(ga.codes || []).join(' | ')}</div>`;
+      // 行表头样式
+      th.style.padding = '10px 12px';
+      th.style.fontSize = '13px';
+      th.style.fontWeight = 'bold';
+      th.style.backgroundColor = '#1a1a1a';
+      th.style.color = '#e5e5e5';
+      th.style.textAlign = 'center';
+      th.style.whiteSpace = 'nowrap';
       tr.appendChild(th);
 
       for (const gb of displayGroups) {
         const td = document.createElement('td');
+        // 基本td样式
+        td.style.padding = '10px 12px';
+        td.style.fontSize = '13px';
+        td.style.textAlign = 'center';
+        td.style.backgroundColor = '#111';
+        td.style.color = '#e5e5e5';
+        td.style.whiteSpace = 'nowrap';
+        td.style.border = '1px solid #333';
+
         if (ga === gb) {
           td.textContent = '-';
-          td.style.color = '#666';
+          td.style.color = '#999';
+          td.style.backgroundColor = '#0a0a0a';
           tr.appendChild(td);
           continue;
         }
@@ -557,7 +592,8 @@
         const cell = document.createElement('div');
         cell.className = 'fare-cell';
         cell.textContent = (best != null ? best : '');
-        cell.style.fontSize = '12px';
+        cell.style.fontSize = '14px';
+        cell.style.fontWeight = 'bold';
         td.appendChild(cell);
 
         // 线路颜色点
@@ -781,7 +817,7 @@
           backgroundColor: bg,
           useCORS: true,
           allowTaint: true,
-          scale: 2,
+          scale: 4, // 提高分辨率
           width: fullW,
           height: fullH,
           windowWidth: fullW,
@@ -794,27 +830,41 @@
               clonedTable.style.overflow = 'visible';
               clonedTable.style.maxHeight = 'none';
               clonedTable.style.maxWidth = 'none';
+              clonedTable.style.borderCollapse = 'separate';
+              clonedTable.style.borderSpacing = '2px';
+              // 确保所有文本可见
+              const cells = clonedTable.querySelectorAll('th, td');
+              cells.forEach(cell => {
+                cell.style.padding = '8px 12px';
+                cell.style.boxSizing = 'border-box';
+                cell.style.whiteSpace = 'nowrap';
+              });
             }
           }
         });
       } else {
-        // Canvas回退方案
+        // Canvas回退方案 - 改进版
         const rows = Array.from(table.querySelectorAll('tr'));
         const cols = Array.from(rows[0].children);
-        const cw = cols.map(c => (c.scrollWidth || c.offsetWidth || 80));
-        const ch = rows.map(r => (r.scrollHeight || r.offsetHeight || 28));
-        const pad = 12, bw = 1;
+        // 增加单元格宽度和高度的计算，考虑内边距
+        const cw = cols.map(c => (c.scrollWidth || c.offsetWidth || 100));
+        const ch = rows.map(r => (r.scrollHeight || r.offsetHeight || 35));
+        const pad = 16, bw = 1; // 增加内边距
         const W = cw.reduce((a, b) => a + b, 0) + pad * 2;
         const H = ch.reduce((a, b) => a + b, 0) + pad * 2;
 
+        // 提高Canvas分辨率
+        const scale = 2;
         canvas = document.createElement('canvas');
-        canvas.width = W;
-        canvas.height = H;
+        canvas.width = W * scale;
+        canvas.height = H * scale;
         const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
         const bg = getComputedStyle(document.body).getPropertyValue('--bg') || '#000';
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
-        ctx.font = '12px Segoe UI';
+        ctx.font = '16px Segoe UI, sans-serif'; // 增大字体
         ctx.textBaseline = 'middle';
 
         let y = pad;
@@ -822,39 +872,52 @@
           let x = pad;
           const cells = Array.from(r.children);
           cells.forEach((cell, ci) => {
-            const w = cw[ci] || 80;
-            const h = ch[ri] || 28;
-            const bg = window.getComputedStyle(cell).backgroundColor;
-            ctx.fillStyle = (bg && bg !== 'rgba(0, 0, 0, 0)') ? bg : (ri === 0 || cell.tagName === 'TH' ? '#0b0b0b' : '#111');
+            const w = cw[ci] || 100;
+            const h = ch[ri] || 35;
+
+            // 获取单元格背景色
+            const cellBg = window.getComputedStyle(cell).backgroundColor;
+            ctx.fillStyle = (cellBg && cellBg !== 'rgba(0, 0, 0, 0)') ? cellBg :
+                           (ri === 0 || cell.tagName === 'TH' ? '#0b0b0b' : '#111');
             ctx.fillRect(x, y, w, h);
-            ctx.strokeStyle = '#1a1a1a';
+
+            // 边框
+            ctx.strokeStyle = '#333'; // 加深边框颜色
             ctx.lineWidth = bw;
             ctx.strokeRect(x, y, w, h);
-            ctx.fillStyle = '#e5e5e5';
+
+            // 获取文本颜色（从计算样式）
+            const textColor = window.getComputedStyle(cell).color || '#e5e5e5';
+            ctx.fillStyle = textColor;
             const txt = (cell.innerText || '').trim();
+
+            // 绘制文本（确保不被裁剪）
             ctx.save();
             ctx.beginPath();
-            ctx.rect(x + 4, y + 2, w - 8, h - 4);
+            // 增加裁剪区域的内边距
+            ctx.rect(x + 6, y + 4, w - 12, h - 8);
             ctx.clip();
-            ctx.fillText(txt, x + 6, y + h / 2);
+            // 文本位置居中
+            ctx.textAlign = 'center';
+            ctx.fillText(txt, x + w / 2, y + h / 2);
+            ctx.restore();
 
             // 画彩色小点（若存在）
             const dots = cell.querySelectorAll('.line-dots .dot');
             if (dots && dots.length) {
-              let dx = x + 8;
-              const dy = y + 8;
+              let dx = x + 10;
+              const dy = y + 10;
               dots.forEach(d => {
                 ctx.beginPath();
                 ctx.fillStyle = getComputedStyle(d).backgroundColor;
-                ctx.arc(dx, dy, 3, 0, Math.PI * 2);
+                ctx.arc(dx, dy, 4, 0, Math.PI * 2); // 增大点大小
                 ctx.fill();
-                dx += 10;
+                dx += 12;
               });
             }
-            ctx.restore();
             x += w;
           });
-          y += ch[ri] || 28;
+          y += ch[ri] || 35;
         });
       }
 
