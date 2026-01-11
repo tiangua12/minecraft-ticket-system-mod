@@ -1,0 +1,25 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " s ",
+    " m ",
+    "ebe"
+  ],
+  "key": {
+    "s": {
+      "item": "minecraft:sugar"
+    },
+    "m": {
+      "item": "minecraft:milk_bucket"
+    },
+    "e": {
+      "item": "minecraft:egg"
+    },
+    "b": {
+      "item": "minecraft:bread"
+    }
+  },
+  "result": {
+    "item": "ticketsystem:custom_cake"
+  }
+}

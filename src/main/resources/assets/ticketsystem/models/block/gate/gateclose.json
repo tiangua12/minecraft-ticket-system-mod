@@ -1,0 +1,9 @@
+{
+  "parent": "block/cube_all",
+  "loader": "forge:obj",
+  "flip_v": true,
+  "model": "ticketsystem:models/block/gate/gateclose.obj",
+  "textures": {
+    "particle": "ticketsystem:block/gates/gateclose"
+  }
+}

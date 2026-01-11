@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>火车票务系统·控制台</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 主题切换按钮 */
+    .theme-toggle {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+
+    .theme-toggle:hover {
+      background: var(--card);
+    }
+
+    .theme-icon {
+      font-size: 18px;
+    }
+
+    /* 返回按钮样式调整 */
+    .site-header {
+      position: relative;
+    }
+
+    /* 票务管理子标签页 */
+    .sub-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+
+    .sub-tab {
+      background: transparent;
+      color: var(--muted);
+      border: none;
+      border-radius: 6px;
+      padding: 8px 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    .sub-tab:hover {
+      color: var(--text);
+    }
+
+    .sub-tab.active {
+      color: var(--text);
+      background: var(--surface);
+      border: 1px solid var(--border);
+    }
+
+    .sub-view {
+      display: none;
+    }
+
+    .sub-view.active {
+      display: block;
+    }
+
+    /* 车票计算器 */
+    .ticket-calculator {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .ticket-calculator .form-row {
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: flex-end;
+    }
+
+    .ticket-calculator .form-group {
+      flex: 1;
+    }
+
+    .ticket-calculator label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    .ticket-calculator select,
+    .ticket-calculator input {
+      width: 100%;
+      padding: 12px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+    }
+
+    .ticket-calculator button {
+      padding: 12px 24px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .ticket-calculator button:hover {
+      background: var(--accent-soft);
+    }
+
+    .ticket-preview {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-top: 24px;
+    }
+
+    .ticket-preview canvas {
+      max-width: 100%;
+      border-radius: 8px;
+      background: white;
+    }
+
+    .export-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    /* 线路编辑器 */
+    .line-toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .line-toolbar input {
+      padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 14px;
+      min-width: 120px;
+    }
+
+    .line-toolbar button {
+      padding: 10px 20px;
+      background: var(--accent);
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    .line-toolbar button.btn-secondary {
+      background: var(--surface);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .line-toolbar button:hover {
+      background: var(--accent-soft);
+    }
+
+    .line-toolbar button.btn-secondary:hover {
+      background: var(--card);
+    }
+
+    .line-editor {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      min-height: 400px;
+      overflow: auto;
+    }
+
+    /* 票价图样式（预留） */
+    .fare-chart-container {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .fare-chart-toolbar {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+    }
+
+    .fare-chart-view {
+      display: none;
+    }
+
+    .fare-chart-view.active {
+      display: block;
+    }
+
+    .fare-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    .fare-table th,
+    .fare-table td {
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+      text-align: center;
+    }
+
+    .fare-table th {
+      background: var(--surface);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+  <header class="site-header">
+    <div class="title" style="display: flex; align-items: center; gap: 16px;">
+      <button onclick="window.location.href='index.html'" style="padding: 8px 16px; background: var(--accent); color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 700;">返回主界面</button>
+      <span>火车票务系统·控制台</span>
+    </div>
+    <nav class="tabs">
+      <button class="tab active" data-tab="dashboard">仪表盘</button>
+      <button class="tab" data-tab="ticket">票务管理</button>
+      <button class="tab" data-tab="settings">系统设置</button>
+    </nav>
+    <button id="themeToggle" class="theme-toggle">
+      <span class="theme-icon">🌙</span>
+      <span id="themeLabel">深色模式</span>
+    </button>
+  </header>
+
+  <main>
+    <section id="view-dashboard" class="view active">
+      <div class="metrics">
+        <div class="metric-card">
+          <div class="metric-title">车站数量</div>
+          <div class="metric-value" id="stationCount">0</div>
+        </div>
+        <div class="metric-card">
+          <div class="metric-title">线路数量</div>
+          <div class="metric-value" id="lineCount">0</div>
+        </div>
+      </div>
+      <div class="hero"></div>
+    </section>
+
+    <section id="view-ticket" class="view">
+      <div class="section-title">
+        <span>票务管理</span>
+        <span class="hint">线路编辑、车票计算与导出功能</span>
+      </div>
+
+      <!-- 子标签页导航 -->
+      <div class="sub-tabs">
+        <button class="sub-tab active" data-subtab="line-editor">线路编辑</button>
+        <button class="sub-tab" data-subtab="ticket-calculator">车票计算</button>
+        <button class="sub-tab" data-subtab="ticket-export">车票导出</button>
+        <button class="sub-tab" data-subtab="fare-chart">票价图</button>
+      </div>
+
+      <!-- 线路编辑子视图 -->
+      <div id="subview-line-editor" class="sub-view active">
+        <div class="section-title" style="font-size: 18px; margin-bottom: 16px;">
+          <span>线路编辑器</span>
+          <span class="hint">左键在线路上创建车站，点击区间调整区间票价</span>
+        </div>
+        <div class="line-toolbar">
+          <input id="newLineId" type="text" placeholder="例如 L1" />
+          <input id="newLineColor" type="text" placeholder="#3366CC 或 orange（支持HEX或名称）" />
+          <button id="createLineBtn">新建线路</button>
+          <button id="recalculateFaresBtn" class="btn-secondary">重新计算票价</button>
+        </div>
+        <div id="lineEditor" class="line-editor"></div>
+      </div>
+
+      <!-- 车票计算子视图 -->
+      <div id="subview-ticket-calculator" class="sub-view">
+        <div class="ticket-calculator">
+          <div class="section-title" style="font-size: 18px; margin-bottom: 20px;">
+            <span>车票计算器</span>
+            <span class="hint">选择起点和终点站计算票价</span>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="startStation">起点站</label>
+              <select id="startStation">
+                <option value="">请选择起点站</option>
+                <!-- 车站选项将通过JavaScript动态加载 -->
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="endStation">终点站</label>
+              <select id="endStation">
+                <option value="">请选择终点站</option>
+                <!-- 车站选项将通过JavaScript动态加载 -->
+              </select>
+            </div>
+            <div class="form-group" style="flex: 0 0 auto;">
+              <button id="calculateTicketBtn">计算票价</button>
+            </div>
+          </div>
+
+          <div id="ticketResult" style="display: none;">
+            <div style="background: var(--surface); border-radius: 12px; padding: 20px; margin-top: 20px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+                <h3 style="margin: 0; color: var(--text);">车票详情</h3>
+                <span id="ticketPrice" style="font-size: 32px; font-weight: 900; color: var(--accent);">0.00</span>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <div>
+                  <div style="color: var(--muted); font-size: 12px;">起点站</div>
+                  <div id="ticketStartStation" style="font-weight: 700; color: var(--text);">-</div>
+                </div>
+                <div>
+                  <div style="color: var(--muted); font-size: 12px;">终点站</div>
+                  <div id="ticketEndStation" style="font-weight: 700; color: var(--text);">-</div>
+                </div>
+                <div>
+                  <div style="color: var(--muted); font-size: 12px;">距离</div>
+                  <div id="ticketDistance" style="font-weight: 700; color: var(--text);">-</div>
+                </div>
+                <div>
+                  <div style="color: var(--muted); font-size: 12px;">票价类型</div>
+                  <div id="ticketFareType" style="font-weight: 700; color: var(--text);">普通票</div>
+                </div>
+              </div>
+              <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+                <div style="color: var(--muted); font-size: 12px;">票号</div>
+                <div id="ticketNumber" style="font-family: monospace; font-weight: 700; color: var(--text);">TICKET-000000</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 车票导出于视图 -->
+      <div id="subview-ticket-export" class="sub-view">
+        <div class="ticket-calculator">
+          <div class="section-title" style="font-size: 18px; margin-bottom: 20px;">
+            <span>车票导出</span>
+            <span class="hint">生成并导出车票图片</span>
+          </div>
+
+          <div class="ticket-preview">
+            <div style="margin-bottom: 20px;">
+              <div style="color: var(--muted); font-size: 12px;">车票预览</div>
+              <canvas id="ticketCanvas" width="800" height="400"></canvas>
+            </div>
+
+            <div class="export-actions">
+              <button id="generateTicketBtn">生成车票</button>
+              <button id="downloadTicketBtn" disabled>下载PNG</button>
+              <button id="printTicketBtn" disabled>打印</button>
+            </div>
+
+            <div style="margin-top: 24px; color: var(--muted); font-size: 14px;">
+              <div>提示：</div>
+              <ul style="margin: 8px 0; padding-left: 20px;">
+                <li>首先使用"车票计算器"计算票价并生成车票详情</li>
+                <li>点击"生成车票"按钮创建车票图片预览</li>
+                <li>点击"下载PNG"保存车票图片文件</li>
+                <li>点击"打印"使用浏览器打印功能打印车票</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 票价图子视图 -->
+      <div id="subview-fare-chart" class="sub-view">
+        <div class="fare-chart-container">
+          <div class="section-title" style="font-size: 18px; margin-bottom: 20px;">
+            <span>票价图</span>
+            <span class="hint">查看所有车站间的票价表，支持导出</span>
+          </div>
+
+          <div class="fare-chart-toolbar">
+            <button id="showRegularChart" class="sub-tab active" data-chart="regular">普通票价</button>
+            <button id="showExpressChart" class="sub-tab" data-chart="express">特急票价</button>
+            <button id="exportChartPng" class="btn-secondary">导出PNG</button>
+            <button id="exportChartExcel" class="btn-secondary">导出Excel</button>
+            <button id="refreshFareChart" class="btn-secondary">刷新数据</button>
+          </div>
+
+          <div id="fare-chart-regular" class="fare-chart-view active">
+            <div style="margin-bottom: 16px; color: var(--muted);">
+              普通票价表（单位：铜币）
+            </div>
+            <div id="regular-fare-table-container" class="fare-table-container">
+              <!-- 普通票价表将通过JavaScript动态生成 -->
+              <div style="text-align: center; padding: 40px; color: var(--muted);">
+                加载票价数据中...
+              </div>
+            </div>
+          </div>
+
+          <div id="fare-chart-express" class="fare-chart-view">
+            <div style="margin-bottom: 16px; color: var(--muted);">
+              特急票价表（单位：铜币）
+            </div>
+            <div id="express-fare-table-container" class="fare-table-container">
+              <!-- 特急票价表将通过JavaScript动态生成 -->
+              <div style="text-align: center; padding: 40px; color: var(--muted);">
+                当前系统仅支持普通票价
+              </div>
+            </div>
+          </div>
+
+          <div style="margin-top: 24px; color: var(--muted); font-size: 14px;">
+            <div>使用说明：</div>
+            <ul style="margin: 8px 0; padding-left: 20px;">
+              <li>点击"普通票价"或"特急票价"切换查看不同票价表</li>
+              <li>点击"导出PNG"将票价表保存为图片</li>
+              <li>点击"导出Excel"将票价表导出为CSV文件</li>
+              <li>点击"刷新数据"重新加载最新票价信息</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="settings-grid">
+        <div class="setting-card">
+          <div class="setting-title">API地址</div>
+          <div class="row">
+            <input id="apiBaseInput" type="text" placeholder="http://192.140.163.241:23333/api" />
+            <button id="saveApiBaseBtn">保存</button>
+          </div>
+          <div class="muted">修改后前端会使用新的API地址。</div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-title">数据导入/导出</div>
+          <div class="row">
+            <button id="exportBtn">导出JSON</button>
+            <label class="file-btn">导入JSON<input id="importFile" type="file" accept="application/json" hidden /></label>
+          </div>
+          <div class="muted">可在此备份或恢复系统数据。</div>
+        </div>
+        <div class="setting-card">
+          <div class="setting-title">危险操作</div>
+          <button id="resetDataBtn" class="danger">清空全部数据</button>
+          <div class="muted">将清空站点、线路与票价。</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div>后端运行在 <code>/api</code> · 数据保存在 <code>web/data/*.json</code></div>
+  </footer>
+
+  <script src="theme.js"></script>
+  <script src="console.js"></script>
+</body>
+</html>

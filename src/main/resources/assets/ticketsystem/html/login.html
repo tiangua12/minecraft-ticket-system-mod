@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>控制台登录</title>
+  <link rel="stylesheet" href="style.css" />
+  <style>
+    /* 主题切换按钮 */
+    .theme-toggle {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+
+    .theme-toggle:hover {
+      background: var(--card);
+    }
+
+    .theme-icon {
+      font-size: 18px;
+    }
+
+    /* 头部样式调整 */
+    .brand {
+      position: relative;
+    }
+  </style>
+</head>
+<body>
+  <header class="brand">
+    <div class="brand-title">火车票务系统 · 登录</div>
+    <button id="themeToggle" class="theme-toggle">
+      <span class="theme-icon">🌙</span>
+      <span id="themeLabel">深色模式</span>
+    </button>
+  </header>
+  <main>
+    <section class="login-overlay" style="position:static;background:transparent">
+      <div class="login-card" style="margin:40px auto;">
+        <div class="login-title">控制台登录</div>
+        <div class="login-row"><input id="loginUser" type="text" placeholder="用户名" /></div>
+        <div class="login-row"><input id="loginPass" type="password" placeholder="密码" /></div>
+        <div class="login-actions">
+          <button id="loginBtn" class="btn primary">登录</button>
+          <span id="loginHint" class="hint" style="margin-left:10px"></span>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="theme.js"></script>
+  <script src="login.js"></script>
+</body>
+</html>

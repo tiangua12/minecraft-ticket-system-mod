@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>车站编辑 - 铁路票务系统</title>
+    <link rel="stylesheet" href="style.css">
+    <style>
+        /* 移动端优化样式 */
+        .station-edit-container {
+            max-width: 100%;
+            padding: 16px;
+            box-sizing: border-box;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: var(--text);
+        }
+
+        .form-input {
+            width: 100%;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--card-bg);
+            color: var(--text);
+            font-size: 16px; /* 移动端友好 */
+            box-sizing: border-box;
+        }
+
+        .form-input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 2px rgba(var(--accent-rgb), 0.1);
+        }
+
+        .form-hint {
+            display: block;
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .form-row {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        .btn {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+        }
+
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-dark);
+        }
+
+        .btn-secondary {
+            background: var(--card-bg);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: var(--hover);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-danger:hover {
+            background: #c82333;
+        }
+
+        .section-title {
+            margin: 24px 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid var(--border);
+            color: var(--text);
+            font-size: 18px;
+            font-weight: bold;
+        }
+
+        .station-list {
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--card-bg);
+        }
+
+        .station-item {
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+
+        .station-item:hover {
+            background: var(--hover);
+        }
+
+        .station-item.selected {
+            background: rgba(var(--accent-rgb), 0.1);
+            border-left: 4px solid var(--accent);
+        }
+
+        .station-code {
+            font-family: monospace;
+            font-weight: bold;
+            color: var(--accent);
+        }
+
+        .station-name {
+            margin-left: 8px;
+            color: var(--text);
+        }
+
+        .station-coords {
+            display: block;
+            margin-top: 4px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 24px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s;
+        }
+
+        .toast.show {
+            opacity: 1;
+        }
+
+        @media (max-width: 480px) {
+            .form-row {
+                flex-direction: column;
+                gap: 12px;
+            }
+
+            .btn-group {
+                flex-direction: column;
+            }
+        }
+
+    /* 主题切换按钮 */
+    .theme-toggle {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 16px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      z-index: 10;
+    }
+
+    .theme-toggle:hover {
+      background: var(--card);
+    }
+
+    .theme-icon {
+      font-size: 18px;
+    }
+    </style>
+    <script src="theme.js"></script>
+</head>
+<body>
+    <div class="station-edit-container">
+        <header class="brand" style="margin-bottom: 24px; position: relative;">
+            <div class="brand-title">车站编辑</div>
+            <nav class="tabs">
+                <button class="tab" onclick="window.location.href='index.html'">返回控制台</button>
+            </nav>
+            <button id="themeToggle" class="theme-toggle">
+                <span class="theme-icon">🌙</span>
+                <span id="themeLabel">深色模式</span>
+            </button>
+        </header>
+
+        <div class="form-section">
+            <h3 class="section-title">添加/编辑车站</h3>
+
+            <div class="form-group">
+                <label class="form-label" for="station-code">车站编码 *</label>
+                <input type="text" id="station-code" class="form-input"
+                       placeholder="例如: 01-01 或 L1-ABC 或 任意标识符">
+                <span class="form-hint">可以是任意字符串，建议使用易于识别的格式</span>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="station-name">车站名称 *</label>
+                <input type="text" id="station-name" class="form-input"
+                       placeholder="例如: 北京站">
+                <span class="form-hint">中文车站名称</span>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="station-en-name">英文名称</label>
+                <input type="text" id="station-en-name" class="form-input"
+                       placeholder="例如: Beijing Station">
+                <span class="form-hint">可选，用于国际乘客</span>
+            </div>
+
+            <div class="section-title" style="margin-top: 32px;">坐标信息 (可选)</div>
+            <div class="form-hint" style="margin-bottom: 16px;">
+                坐标用于地图显示和距离计算（如果启用）。留空或填0表示不使用坐标。
+            </div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label class="form-label" for="station-x">X坐标</label>
+                    <input type="number" id="station-x" class="form-input"
+                           placeholder="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="station-y">Y坐标</label>
+                    <input type="number" id="station-y" class="form-input"
+                           placeholder="0" step="1">
+                </div>
+                <div class="form-group">
+                    <label class="form-label" for="station-z">Z坐标</label>
+                    <input type="number" id="station-z" class="form-input"
+                           placeholder="0" step="1">
+                </div>
+            </div>
+
+            <div class="btn-group">
+                <button id="btn-save" class="btn btn-primary">保存车站</button>
+                <button id="btn-new" class="btn btn-secondary">新建车站</button>
+                <button id="btn-delete" class="btn btn-danger" disabled>删除车站</button>
+            </div>
+        </div>
+
+        <div class="form-section" style="margin-top: 40px;">
+            <h3 class="section-title">现有车站</h3>
+            <div class="form-hint" style="margin-bottom: 16px;">
+                点击车站可编辑，使用下方搜索框快速查找。
+            </div>
+
+            <div class="form-group">
+                <input type="text" id="search-stations" class="form-input"
+                       placeholder="搜索车站编码或名称...">
+            </div>
+
+            <div id="station-list" class="station-list">
+                <!-- 车站列表将通过JavaScript动态加载 -->
+                <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    加载中...
+                </div>
+            </div>
+        </div>
+
+        <div class="form-section" style="margin-top: 40px;">
+            <h3 class="section-title">票价信息</h3>
+            <div class="form-hint" style="margin-bottom: 16px;">
+                显示当前车站到其他车站的票价（单位：铜币）。点击车站可查看详细信息。
+            </div>
+
+            <div class="form-group">
+                <input type="text" id="search-fares" class="form-input"
+                       placeholder="搜索目标车站编码或名称...">
+            </div>
+
+            <div id="fare-list" class="station-list">
+                <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                    请先选择一个车站以查看票价信息
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script>
+        // 全局变量
+        let currentStation = null;
+        let allStations = [];
+        let filteredStations = [];
+        let allFares = [];
+        let filteredFares = [];
+
+        // DOM加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // 主题切换功能（使用公共模块）
+            window.ThemeManager.init();
+
+            // 绑定按钮事件
+            document.getElementById('btn-save').addEventListener('click', saveStation);
+            document.getElementById('btn-new').addEventListener('click', newStation);
+            document.getElementById('btn-delete').addEventListener('click', deleteStation);
+            document.getElementById('search-stations').addEventListener('input', filterStations);
+            document.getElementById('search-fares').addEventListener('input', filterFares);
+
+            // 加载车站列表
+            loadStations();
+        });
+
+        // 显示提示消息
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast';
+
+            // 根据类型设置颜色
+            if (type === 'success') {
+                toast.style.background = 'var(--success-bg, #d4edda)';
+                toast.style.borderColor = 'var(--success-border, #c3e6cb)';
+                toast.style.color = 'var(--success-text, #155724)';
+            } else if (type === 'error') {
+                toast.style.background = 'var(--error-bg, #f8d7da)';
+                toast.style.borderColor = 'var(--error-border, #f5c6cb)';
+                toast.style.color = 'var(--error-text, #721c24)';
+            } else {
+                toast.style.background = 'var(--card-bg)';
+                toast.style.borderColor = 'var(--border)';
+                toast.style.color = 'var(--text)';
+            }
+
+            toast.classList.add('show');
+
+            // 3秒后隐藏
+            setTimeout(() => {
+                toast.classList.remove('show');
+            }, 3000);
+        }
+
+        // 从URL获取车站编码参数
+        function getStationCodeFromUrl() {
+            const params = new URLSearchParams(window.location.search);
+            return params.get('code') || params.get('id');
+        }
+
+        // 如果URL中有车站编码参数，自动选择该车站
+        function selectStationIfUrlParam() {
+            const stationCode = getStationCodeFromUrl();
+            if (stationCode && allStations.length > 0) {
+                // 查找车站
+                const station = allStations.find(s => s.code === stationCode);
+                if (station) {
+                    selectStation(stationCode);
+                }
+            }
+        }
+
+        // 加载车站列表
+        async function loadStations() {
+            try {
+                const response = await fetch('/api/stations');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                allStations = await response.json();
+                filteredStations = [...allStations];
+                renderStationList();
+                selectStationIfUrlParam();
+
+            } catch (error) {
+                console.error('Failed to load stations:', error);
+                showToast('加载车站列表失败: ' + error.message, 'error');
+            }
+        }
+
+        // 渲染车站列表
+        function renderStationList() {
+            const container = document.getElementById('station-list');
+
+            if (filteredStations.length === 0) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        暂无车站数据
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = filteredStations.map(station => `
+                <div class="station-item ${currentStation && currentStation.code === station.code ? 'selected' : ''}"
+                     data-code="${station.code}"
+                     onclick="selectStation('${station.code}')">
+                    <span class="station-code">${station.code}</span>
+                    <span class="station-name">${station.name}</span>
+                    ${station.en_name ? `<br><small>${station.en_name}</small>` : ''}
+                    ${station.x || station.y || station.z ?
+                        `<span class="station-coords">坐标: ${station.x || 0}, ${station.y || 0}, ${station.z || 0}</span>` :
+                        ''}
+                </div>
+            `).join('');
+        }
+
+        // 过滤车站列表
+        function filterStations() {
+            const query = document.getElementById('search-stations').value.toLowerCase().trim();
+
+            if (!query) {
+                filteredStations = [...allStations];
+            } else {
+                filteredStations = allStations.filter(station =>
+                    station.code.toLowerCase().includes(query) ||
+                    station.name.toLowerCase().includes(query) ||
+                    (station.en_name && station.en_name.toLowerCase().includes(query))
+                );
+            }
+
+            renderStationList();
+        }
+
+        // 选择车站进行编辑
+        function selectStation(stationCode) {
+            const station = allStations.find(s => s.code === stationCode);
+            if (!station) return;
+
+            currentStation = station;
+
+            // 填充表单
+            document.getElementById('station-code').value = station.code;
+            document.getElementById('station-name').value = station.name;
+            document.getElementById('station-en-name').value = station.en_name || '';
+            document.getElementById('station-x').value = station.x || 0;
+            document.getElementById('station-y').value = station.y || 0;
+            document.getElementById('station-z').value = station.z || 0;
+
+            // 启用删除按钮
+            document.getElementById('btn-delete').disabled = false;
+
+            // 更新列表选中状态
+            renderStationList();
+
+            // 加载票价信息
+            if (allFares.length === 0) {
+                loadFares();
+            } else {
+                renderFareList();
+            }
+
+            // 更新URL参数以反映当前选择的车站
+            const url = new URL(window.location);
+            url.searchParams.set('code', station.code);
+            history.replaceState(null, '', url.toString());
+
+            showToast(`已选择车站: ${station.name}`, 'success');
+        }
+
+        // 新建车站
+        function newStation() {
+            currentStation = null;
+
+            // 清空表单
+            document.getElementById('station-code').value = '';
+            document.getElementById('station-name').value = '';
+            document.getElementById('station-en-name').value = '';
+            document.getElementById('station-x').value = 0;
+            document.getElementById('station-y').value = 0;
+            document.getElementById('station-z').value = 0;
+
+            // 禁用删除按钮
+            document.getElementById('btn-delete').disabled = true;
+
+            // 更新列表选中状态
+            renderStationList();
+
+            // 清空票价显示
+            renderFareList();
+
+            // 焦点设置到编码输入框
+            document.getElementById('station-code').focus();
+
+            // 清除URL参数，进入创建新车站状态
+            const url = new URL(window.location);
+            url.searchParams.delete('code');
+            url.searchParams.delete('id');
+            history.replaceState(null, '', url.toString());
+
+            showToast('已清空表单，准备添加新车站', 'info');
+        }
+
+        // 保存车站
+        async function saveStation() {
+            const stationData = {
+                code: document.getElementById('station-code').value.trim(),
+                name: document.getElementById('station-name').value.trim(),
+                en_name: document.getElementById('station-en-name').value.trim(),
+                x: parseInt(document.getElementById('station-x').value) || 0,
+                y: parseInt(document.getElementById('station-y').value) || 0,
+                z: parseInt(document.getElementById('station-z').value) || 0
+            };
+
+            // 验证必填字段
+            if (!stationData.code) {
+                showToast('请输入车站编码', 'error');
+                document.getElementById('station-code').focus();
+                return;
+            }
+
+            if (!stationData.name) {
+                showToast('请输入车站名称', 'error');
+                document.getElementById('station-name').focus();
+                return;
+            }
+
+            // 编码格式已完全放开，允许任意字符串
+
+            try {
+                const method = currentStation ? 'PUT' : 'POST';
+                const url = currentStation ? `/api/stations/${stationData.code}` : '/api/stations';
+
+                const response = await fetch(url, {
+                    method: method,
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(stationData)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || `HTTP ${response.status}`);
+                }
+
+                showToast(currentStation ? '车站更新成功' : '车站添加成功', 'success');
+
+                // 重新加载列表
+                await loadStations();
+
+                // 如果是新车站，选中它
+                if (!currentStation) {
+                    selectStation(stationData.code);
+                }
+
+            } catch (error) {
+                console.error('Failed to save station:', error);
+                showToast('保存失败: ' + error.message, 'error');
+            }
+        }
+
+        // 删除车站
+        async function deleteStation() {
+            if (!currentStation) {
+                showToast('请先选择一个车站', 'error');
+                return;
+            }
+
+            if (!confirm(`确定要删除车站 "${currentStation.name}" (${currentStation.code}) 吗？此操作不可撤销。`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`/api/stations/${currentStation.code}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || `HTTP ${response.status}`);
+                }
+
+                showToast('车站删除成功', 'success');
+
+                // 清空表单并重新加载列表
+                newStation();
+                await loadStations();
+
+            } catch (error) {
+                console.error('Failed to delete station:', error);
+                showToast('删除失败: ' + error.message, 'error');
+            }
+        }
+
+        // 加载票价数据
+        async function loadFares() {
+            try {
+                const response = await fetch('/api/fares');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+
+                allFares = await response.json();
+                filteredFares = [...allFares];
+                renderFareList();
+
+            } catch (error) {
+                console.error('Failed to load fares:', error);
+                showToast('加载票价数据失败: ' + error.message, 'error');
+            }
+        }
+
+        // 渲染票价列表
+        function renderFareList() {
+            const container = document.getElementById('fare-list');
+
+            if (!currentStation) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        请先选择一个车站以查看票价信息
+                    </div>
+                `;
+                return;
+            }
+
+            if (filteredFares.length === 0) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        暂无票价数据
+                    </div>
+                `;
+                return;
+            }
+
+            // 过滤出从当前车站出发的票价
+            const faresFromCurrent = filteredFares.filter(fare => fare.from === currentStation.code);
+
+            if (faresFromCurrent.length === 0) {
+                container.innerHTML = `
+                    <div class="station-item" style="text-align: center; padding: 40px; color: var(--text-secondary);">
+                        当前车站暂无票价信息
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = faresFromCurrent.map(fare => {
+                // 查找目标车站信息
+                const toStation = allStations.find(s => s.code === fare.to);
+                const stationName = toStation ? toStation.name : fare.to;
+                const stationEnName = toStation ? (toStation.en_name || '') : '';
+
+                return `
+                <div class="station-item">
+                    <span class="station-code">${fare.to}</span>
+                    <span class="station-name">${stationName}</span>
+                    ${stationEnName ? `<br><small>${stationEnName}</small>` : ''}
+                    <span class="station-coords" style="color: var(--accent); font-weight: bold;">
+                        票价: ${fare.price || fare.cost_regular || fare.cost || 0} 铜币
+                    </span>
+                </div>
+                `;
+            }).join('');
+        }
+
+        // 过滤票价列表
+        function filterFares() {
+            const query = document.getElementById('search-fares').value.toLowerCase().trim();
+
+            if (!query) {
+                filteredFares = [...allFares];
+            } else {
+                filteredFares = allFares.filter(fare =>
+                    fare.from.toLowerCase().includes(query) ||
+                    fare.to.toLowerCase().includes(query) ||
+                    (fare.price && fare.price.toString().includes(query))
+                );
+            }
+            renderFareList();
+        }
+
+        // 导出为函数供HTML调用
+        window.selectStation = selectStation;
+    </script>
+</body>
+</html>
