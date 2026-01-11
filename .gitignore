@@ -29,10 +29,9 @@ forge*changelog.txt
 
 源代码备份/
 backup_scripts/
-
-gradle/
 *.zip
 build.gradle.bak
 claude
 chat
 changelog.txt
+乱七八糟的backup/
